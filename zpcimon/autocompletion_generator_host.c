@@ -6,10 +6,11 @@
 
 #include "lib/util_autocomp.h"
 
-#include "opticsmon_cli.h"
+#include "zpcimon_cli.h"
 
 int main(void)
 {
+	generate_autocomp(opt_vec, "zpcimon");
 	generate_autocomp(opt_vec, "opticsmon");
 
 	return 0;

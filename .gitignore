@@ -102,9 +102,11 @@ lsstp/_lsstp
 lsstp/lsstp.bash
 mon_tools/mon_fsstatd
 mon_tools/mon_procd
-opticsmon/opticsmon
-opticsmon/_opticsmon
-opticsmon/opticsmon.bash
+zpcimon/zpcimon
+zpcimon/zpcimon.bash
+zpcimon/_zpcimon
+zpcimon/opticsmon.bash
+zpcimon/_opticsmon
 osasnmpd/osasnmpd
 qetharp/qetharp
 qethqoat/qethqoat

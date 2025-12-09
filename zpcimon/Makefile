@@ -2,8 +2,8 @@ include ../common.mak
 
 TESTS := tests/
 
-zsh-completions = _opticsmon
-bash-completions = opticsmon.bash
+zsh-completions = _zpcimon
+bash-completions = zpcimon.bash
 
 include ../common_autocomp.mak
 
@@ -12,7 +12,7 @@ libs =$(rootdir)/libzpci/libzpci.a $(rootdir)/libutil/libutil.a
 ifneq (${HAVE_OPENSSL},0)
 check_dep_openssl:
 	$(call check_dep, \
-		"opticsmon", \
+		"zpcimon", \
 		"openssl/evp.h", \
 		"openssl-devel", \
 		"HAVE_OPENSSL=0")
@@ -22,7 +22,7 @@ endif # HAVE_OPENSSL
 ifneq (${HAVE_LIBNL3},0)
 check_dep_libnl3:
 	$(call check_dep, \
-		"opticsmon", \
+		"zpcimon", \
 		"netlink/socket.h", \
 		"libnl3-devel", \
 		"HAVE_LIBNL3=0")
@@ -69,20 +69,22 @@ endif
 ALL_CPPFLAGS += $(LIB_CFLAGS)
 LDLIBS += $(LIB_LFLAGS)
 
-BUILDTARGET += opticsmon
+BUILDTARGET += zpcimon
 
 all: ${BUILDTARGET}
 
-opticsmon: opticsmon.o optics_info.o optics_sclp.o ethtool.o link_mon.o $(libs)
+zpcimon: zpcimon.o optics_info.o optics_sclp.o ethtool.o link_mon.o $(libs)
 
 install: all
 	$(INSTALL) -d -m 755 $(DESTDIR)$(BINDIR) $(DESTDIR)$(MANDIR)/man8
-	$(INSTALL) -g $(GROUP) -o $(OWNER) -m 755 opticsmon $(DESTDIR)$(BINDIR)
-	$(INSTALL) -g $(GROUP) -o $(OWNER) -m 644 opticsmon.8 \
+	$(INSTALL) -g $(GROUP) -o $(OWNER) -m 755 zpcimon $(DESTDIR)$(BINDIR)
+	$(INSTALL) -g $(GROUP) -o $(OWNER) -m 644 zpcimon.8 \
 		$(DESTDIR)$(MANDIR)/man8
+	ln -sf zpcimon $(DESTDIR)$(BINDIR)/opticsmon
+	ln -sf zpcimon.8 $(DESTDIR)$(MANDIR)/man8/opticsmon.8
 endif # HAVE_OPENSSL3=0 or HAVE_LIBNL3=0
 
 clean:
-	rm -f *.o *~ opticsmon core
+	rm -f *.o *~ zpcimon core
 
 .PHONY: all install clean

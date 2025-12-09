@@ -316,7 +316,7 @@ build options:
 | glibc-static | `HAVE_LIBC_STATIC` | zfcpdump                               |
 | openssl      | `HAVE_OPENSSL`     | zkey, libekmfweb, libkmipclient,       |
 |              |                    | zgetdump, rust/pvattest, rust/pvimg,   |
-|              |                    | zgetdump/pvsecret, opticsmon           |
+|              |                    | zgetdump/pvsecret, zpcimon             |
 | cryptsetup   | `HAVE_CRYPTSETUP2` | zkey-cryptsetup                        |
 | json-c       | `HAVE_JSONC`       | zkey-cryptsetup, libekmfweb,           |
 |              |                    | libkmipclient                          |
@@ -326,7 +326,7 @@ build options:
 | libxml2      | `HAVE_LIBXML2`     | libkmipclient                          |
 | systemd      | `HAVE_SYSTEMD`     | hsavmcore                              |
 | libudev      | `HAVE_LIBUDEV`     | cpacfstatsd                            |
-| libnl3       | `HAVE_LIBNL3`      | opticsmon                              |
+| libnl3       | `HAVE_LIBNL3`      | zpcimon                                |
 
 This table lists additional build or install options:
 
@@ -374,10 +374,10 @@ the different tools are provided:
 
   The runtime requirements are: openssl-libs (>= 1.1.1) and libcurl.
 
-* opticsmon:
-  For building opticsmon OpenSSL and the Netlink Library Suite (libnl3) are
+* zpcimon:
+  For building zpcimon OpenSSL and the Netlink Library Suite (libnl3) are
   required.
-  Tip: you may skip the opticsmon build by adding
+  Tip: you may skip the zpcimon build by adding
   `HAVE_OPENSSL=0` or `HAVE_LIBNL3=0`
 
 * osasnmpd:

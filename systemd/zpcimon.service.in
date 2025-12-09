@@ -1,5 +1,5 @@
 #
-# Systemd unit for mon_fsstatd (monitor z/VM guest file systems)
+# Systemd unit for zpcimon PCI NIC optical module monitoring
 #
 # Copyright IBM Corp. 2024
 #
@@ -9,11 +9,11 @@
 
 [Unit]
 Description=Monitor health of directly attached PCI NIC optical modules
-# Documentation=man:opticsmon
+# Documentation=man:zpcimon
 
 [Service]
 Type=exec
-ExecStart=@usrsbin_path@/opticsmon --send-report --monitor --interval 86400
+ExecStart=@usrsbin_path@/zpcimon --send-report --monitor --interval 86400
 KillMode=control-group
 
 [Install]

@@ -31,7 +31,7 @@
 #include "link_mon.h"
 #include "optics_info.h"
 #include "optics_sclp.h"
-#include "opticsmon_cli.h"
+#include "zpcimon_cli.h"
 
 #define API_LEVEL 1
 
@@ -52,8 +52,7 @@ struct opticsmon_ctx {
 };
 
 static const struct util_prg prg = {
-	.desc = "Use opticsmon to monitor the health of the optical modules\n"
-		"of directly attached PCI based NICs",
+	.desc = "Use zpcimon to monitor the health of PCI devices",
 	.copyright_vec = { {
 				   .owner = "IBM Corp.",
 				   .pub_first = 2024,

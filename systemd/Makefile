@@ -4,7 +4,7 @@ SYSTEM_UNITS = ttyrun-getty@.service iucvtty-login@.service \
                cpacfstatsd.service cpuplugd.service \
                dumpconf.service cpi.service \
                mon_fsstatd.service mon_procd.service \
-               opticsmon.service
+               zpcimon.service
 
 all:
 
@@ -19,6 +19,9 @@ install: system_units
 	  $(INSTALL) -g $(GROUP) -o $(OWNER) \
 	             -m 644 $$unit $(DESTDIR)$(SYSTEMDSYSTEMUNITDIR) ; \
 	done
+	# Make the legacy opticsmon.service a link to zpcimon.service
+	ln -sf zpcimon.service \
+		$(DESTDIR)$(SYSTEMDSYSTEMUNITDIR)/opticsmon.service
 
 else
 

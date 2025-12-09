@@ -30,20 +30,20 @@
 .  br
 ..
 .
-.TH opticsmon 8 "Oct 2024" s390-tools zpcictl
+.TH zpcimon 8 "Oct 2024" s390-tools zpcictl
 .
 .SH NAME
-opticsmon - Monitor optical modules for directly attached PCI based NICs
+zpcimon - Monitor optical modules for directly attached PCI based NICs
 .
 .
 .SH SYNOPSIS
-.B "opticsmon"
+.B "zpcimon"
 .I "OPTIONS"
 .
 .
 .SH DESCRIPTION
 Use
-.B opticsmon
+.B zpcimon
 to monitor the health of the optical modules of directly attached PCI based
 NICs. When executed without the \fB--monitor\fR option it will collect optical
 module data from all available PCI network interface physical functions and
@@ -80,7 +80,7 @@ on".
 
 .B Example: Extract module information for the first adapter
 
-.CL opticsmon --module-info | jq -r '.adapters[0].netdevs[0].optics.module_info' | base64 -d | hexdump -C
+.CL zpcimon --module-info | jq -r '.adapters[0].netdevs[0].optics.module_info' | base64 -d | hexdump -C
 .PP
 .PP
 .
