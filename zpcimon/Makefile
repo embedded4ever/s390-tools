@@ -73,7 +73,7 @@ BUILDTARGET += zpcimon
 
 all: ${BUILDTARGET}
 
-zpcimon: zpcimon.o optics_info.o optics_sclp.o ethtool.o link_mon.o $(libs)
+zpcimon: zpcimon.o opticsmon.o optics_info.o optics_sclp.o ethtool.o link_mon.o $(libs)
 
 install: all
 	$(INSTALL) -d -m 755 $(DESTDIR)$(BINDIR) $(DESTDIR)$(MANDIR)/man8

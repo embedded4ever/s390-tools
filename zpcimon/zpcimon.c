@@ -1,57 +1,47 @@
 /*
- * opticsmon - Report optics monitoring data to firmware
+ * zpcimon - Report monitoring data to firmware
  *
  * Copyright IBM Corp. 2024
  *
  * s390-tools is free software; you can redistribute it and/or modify
  * it under the terms of the MIT license. See LICENSE for details.
  */
+#include <errno.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <errno.h>
 
+#include <linux/if.h>
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
-#include <signal.h>
 #include <sys/timerfd.h>
-#include <time.h>
-#include <linux/if.h>
-
-#include "lib/util_list.h"
-#include "lib/pci_list.h"
-#include "lib/util_prg.h"
-#include "lib/util_opt.h"
-#include "lib/util_fmt.h"
-#include "lib/util_libc.h"
-#include "lib/util_time.h"
 
 #include <openssl/evp.h>
 
-#include "ethtool.h"
-#include "link_mon.h"
-#include "optics_info.h"
-#include "optics_sclp.h"
+#include "lib/pci_list.h"
+#include "lib/util_fmt.h"
+#include "lib/util_libc.h"
+#include "lib/util_opt.h"
+#include "lib/util_prg.h"
+#include "lib/util_time.h"
+#include "lib/zt_common.h"
+
+#include "opticsmon.h"
+#include "zpcimon.h"
 #include "zpcimon_cli.h"
 
 #define API_LEVEL 1
 
-struct options {
-	bool monitor;
-	bool report;
-	bool module_info;
-	bool quiet;
-	enum util_fmt_t format;
-	bool explicit_format;
-
-	uint32_t interval_seconds;
+struct zpcimon_monitor {
+	const struct zpcimon_ops *ops;
+	uint32_t initialized : 1;
+	uint32_t opened : 1;
 };
 
-struct opticsmon_ctx {
-	struct options opts;
-	struct ethtool_nl_ctx ethtool_ctx;
-	struct link_mon_nl_ctx lctx;
-	struct util_list *zpci_list;
+static struct zpcimon_monitor monitors[] = {
+	{.ops = &opticsmon_ops, .initialized = 0, .opened = 0},
 };
 
 static const struct util_prg prg = {
@@ -122,171 +112,131 @@ static void parse_cmdline(int argc, char *argv[], struct options *opts)
 	} while (cmd != -1);
 }
 
-static int module_info_pair(struct optics *oi)
+void zpcimon_json_base64_pair(char *name, uint8_t *buf, int len)
 {
-	size_t b64_calclen, b64len;
-	int rc = EXIT_SUCCESS;
+	int b64_calclen, b64len;
 	char *b64;
 
-	b64_calclen = (oi->size / 3) * 4;
-	if (oi->size % 3 > 0)
+	b64_calclen = (len / 3) * 4;
+	if (len % 3 > 0)
 		b64_calclen += 4;
 
 	b64 = util_zalloc(b64_calclen + 1); /* adds NUL byte */
-	b64len = EVP_EncodeBlock((unsigned char *)b64, oi->raw, oi->size);
+	b64len = EVP_EncodeBlock((unsigned char *)b64, (unsigned char *)buf, len);
 	if (b64len != b64_calclen) {
-		fprintf(stderr, "encoding base64 via openssl failed\n");
-		rc = EXIT_FAILURE;
+		warnx("encoding base64 via openssl failed\n");
 		goto out;
 	}
-	util_fmt_pair(FMT_QUOTE, "module_info", b64);
+	util_fmt_pair(FMT_QUOTE, name, b64);
 out:
 	free(b64);
-	return rc;
 }
 
-static void optics_json_print(struct opticsmon_ctx *ctx, struct zpci_netdev *nd, struct optics *oi)
-{
-	util_fmt_obj_start(FMT_DEFAULT, "netdev");
-	util_fmt_pair(FMT_QUOTE, "name", nd->name);
-	util_fmt_pair(FMT_QUOTE, "operstate", zpci_operstate_str(nd->operstate));
-	util_fmt_obj_start(FMT_DEFAULT, "optics");
-	util_fmt_pair(FMT_QUOTE, "type", optics_type_str(optics_type(oi)));
-	util_fmt_pair(FMT_QUOTE, "rx_los", optics_los_str(optics_rx_los(oi)));
-	util_fmt_pair(FMT_QUOTE, "tx_los", optics_los_str(optics_tx_los(oi)));
-	util_fmt_pair(FMT_QUOTE, "tx_fault", optics_los_str(optics_tx_fault(oi)));
-	if (ctx->opts.module_info)
-		module_info_pair(oi);
-	util_fmt_obj_end();
-	util_fmt_obj_end();
-}
-
-static int dump_adapter_data(struct opticsmon_ctx *ctx, struct zpci_dev *zdev)
-{
-	struct optics **ois;
-	int num_ois = 0;
-	char *pci_addr;
-	int i, rc;
-
-	ois = util_zalloc(sizeof(ois[0]) * zdev->num_netdevs);
-	for (i = 0; i < zdev->num_netdevs; i++) {
-		rc = ethtool_nl_get_optics(&ctx->ethtool_ctx, zdev->netdevs[i].name, &ois[i]);
-		if (rc)
-			goto free_ois;
-		num_ois++;
-	}
-	if (!ctx->opts.quiet) {
-		util_fmt_obj_start(FMT_DEFAULT, "adapter");
-		util_fmt_pair(FMT_QUOTE, "pft", zpci_pft_str(zdev));
-		util_fmt_obj_start(FMT_DEFAULT, "ids");
-		util_fmt_pair(FMT_QUOTE, "fid", "0x%0x", zdev->fid);
-		if (zdev->uid_is_unique)
-			util_fmt_pair(FMT_QUOTE, "uid", "0x%0x", zdev->uid);
-		pci_addr = zpci_pci_addr(zdev);
-		util_fmt_pair(FMT_QUOTE, "pci_address", pci_addr);
-		free(pci_addr);
-		util_fmt_obj_end();
-		util_fmt_obj_start(FMT_LIST, "netdevs");
-		for (i = 0; i < zdev->num_netdevs; i++)
-			optics_json_print(ctx, &zdev->netdevs[i], ois[i]);
-		util_fmt_obj_end(); /* netdevs list */
-		util_fmt_obj_end(); /* adapter */
-		fflush(stdout);
-	}
-	if (ctx->opts.report) {
-		for (i = 0; i < zdev->num_netdevs; i++) {
-			rc = sclp_issue_optics_report(zdev, ois[i]);
-			if (rc == -ENOTSUP) {
-				fprintf(stderr, "Skipping %s which does not support reporting\n",
-					zdev->netdevs[i].name);
-			} else if (rc < 0) {
-				fprintf(stderr, "Error issuing SCLP for optics data failed: %s\n",
-					strerror(-rc));
-			}
-		}
-	}
-free_ois:
-	for (i = 0; i < num_ois; i++)
-		optics_free(ois[i]);
-	free(ois);
-	return rc;
-}
-
-static void zpci_list_reload(struct util_list **zpci_list)
+void zpci_list_reload(struct util_list **zpci_list)
 {
 	if (*zpci_list)
 		zpci_free_dev_list(*zpci_list);
 	*zpci_list = zpci_dev_list();
 }
 
-static void dump_all_adapter_data(struct opticsmon_ctx *ctx)
+static void collect_all_adapter_data(struct zpcimon_ctx *ctx)
 {
 	struct zpci_dev *zdev;
+	int i;
 
 	zpci_list_reload(&ctx->zpci_list);
 	util_list_iterate(ctx->zpci_list, zdev) {
-		/* Filter non-NIC devices and VFs */
-		if (zpci_is_vf(zdev) || !zdev->num_netdevs)
-			continue;
-		dump_adapter_data(ctx, zdev);
+		for (i = 0; i < (int)ARRAY_SIZE(monitors); i++)
+			if (monitors[i].ops->collect_adapter_data)
+				monitors[i].ops->collect_adapter_data(ctx, zdev);
 	}
-}
-
-static int oneshot_mode(struct opticsmon_ctx *ctx)
-{
-	util_fmt_init(stdout, ctx->opts.format, FMT_DEFAULT, API_LEVEL);
-	if (!ctx->opts.quiet)
-		util_fmt_obj_start(FMT_LIST, "adapters");
-	dump_all_adapter_data(ctx);
-	if (!ctx->opts.quiet)
-		util_fmt_obj_end();
-	util_fmt_exit();
-
-	return EXIT_SUCCESS;
-}
-
-void on_link_change(struct zpci_netdev *netdev, void *arg)
-{
-	struct opticsmon_ctx *ctx = arg;
-	struct zpci_netdev *found_netdev;
-	struct zpci_dev *zdev = NULL;
-	int reloads = 1;
-
-	do {
-		if (ctx->zpci_list) {
-			zdev = zpci_find_by_netdev(ctx->zpci_list, netdev->name, &found_netdev);
-			if (zdev) {
-				/* Skip data collection if operational state is
-				 * unchanged
-				 */
-				if (found_netdev->operstate == netdev->operstate)
-					return;
-				/* Update operation state for VFs even though
-				 * they are skipped just for a consistent view
-				 */
-				found_netdev->operstate = netdev->operstate;
-				/* Only collect optics data for PFs */
-				if (!zpci_is_vf(zdev))
-					dump_adapter_data(ctx, zdev);
-				return;
-			}
-		}
-		/* Could be uninitalized list or a new device, retry after reload  */
-		zpci_list_reload(&ctx->zpci_list);
-		reloads--;
-	} while (reloads > 0);
 }
 
 #define MAX_EVENTS 8
 
-static int monitor_wait_loop(struct opticsmon_ctx *ctx, int sigfd, int timerfd)
+static int monitor_epoll_mon_fds_prepare(struct zpcimon_ctx *ctx, int epfd, int mon_fds[])
+{
+	struct epoll_event ev;
+	int mon_idx;
+
+	for (mon_idx = 0; mon_idx < (int)ARRAY_SIZE(monitors); mon_idx++) {
+		if (!monitors[mon_idx].ops->get_monitor_fd) {
+			mon_fds[mon_idx] = -1;
+			continue;
+		}
+		mon_fds[mon_idx] = monitors[mon_idx].ops->get_monitor_fd(ctx);
+		if (mon_fds[mon_idx] < 0)
+			return -EIO;
+		ev.events = EPOLLIN;
+		ev.data.fd = mon_fds[mon_idx];
+		if (epoll_ctl(epfd, EPOLL_CTL_ADD, mon_fds[mon_idx], &ev) == -1)
+			return -EIO;
+	}
+	return 0;
+}
+
+static void monitor_epoll_mon_fds(struct zpcimon_ctx *ctx, struct epoll_event event,
+				  const int mon_fds[])
+{
+	int mon_idx;
+
+	for (mon_idx = 0; mon_idx < (int)ARRAY_SIZE(monitors); mon_idx++) {
+		if (event.data.fd != mon_fds[mon_idx])
+			continue;
+		if (!monitors[mon_idx].ops->monitor_fd_handle)
+			continue;
+		monitors[mon_idx].ops->monitor_fd_handle(ctx);
+	}
+}
+
+static int monitor_epoll(struct zpcimon_ctx *ctx, const int mon_fds[], int epfd, int sigfd,
+			 int timerfd)
 {
 	struct epoll_event events[MAX_EVENTS];
-	int i, nlfd, epfd, nfds, ret = -EIO;
 	struct signalfd_siginfo fdsi;
-	struct epoll_event ev;
 	uint64_t expirations;
 	ssize_t sread;
+	int i, nfds;
+
+	nfds = epoll_wait(epfd, events, MAX_EVENTS, -1);
+	if (nfds < 0)
+		return nfds;
+	for (i = 0; i < nfds; i++) {
+		/* signal fd */
+		if (events[i].data.fd == sigfd) {
+			sread = read(sigfd, &fdsi, sizeof(fdsi));
+			if (sread != sizeof(fdsi))
+				return -EIO;
+			switch (fdsi.ssi_signo) {
+			case SIGINT:
+			case SIGTERM:
+			case SIGQUIT:
+				return -EINTR;
+			/* Unexpected signal */
+			default:
+				return -EIO;
+			}
+			/* timer fd */
+		} else if (events[i].data.fd == timerfd) {
+			sread = read(timerfd, &expirations, sizeof(uint64_t));
+			if (sread != sizeof(uint64_t))
+				return -EIO;
+			if (!expirations)
+				continue;
+			collect_all_adapter_data(ctx);
+			/* netlink fd */
+		} else {
+			monitor_epoll_mon_fds(ctx, events[i], mon_fds);
+		}
+	}
+	return 0;
+}
+
+static int monitor_wait_loop(struct zpcimon_ctx *ctx, int sigfd, int timerfd)
+{
+	int mon_fds[ARRAY_SIZE(monitors)];
+	struct epoll_event ev;
+	int epfd, ret = -EIO;
 
 	epfd = epoll_create1(EPOLL_CLOEXEC);
 	if (epfd < 0)
@@ -302,52 +252,57 @@ static int monitor_wait_loop(struct opticsmon_ctx *ctx, int sigfd, int timerfd)
 	if (epoll_ctl(epfd, EPOLL_CTL_ADD, timerfd, &ev) == -1)
 		goto out_close;
 
-	nlfd = link_mon_nl_waitfd_getfd(&ctx->lctx);
-	ev.events = EPOLLIN;
-	ev.data.fd = nlfd;
-	if (epoll_ctl(epfd, EPOLL_CTL_ADD, nlfd, &ev) == -1)
+	ret = monitor_epoll_mon_fds_prepare(ctx, epfd, mon_fds);
+	if (ret)
 		goto out_close;
 
 	while (1) {
-		nfds = epoll_wait(epfd, events, MAX_EVENTS, -1);
-		if (nfds < 0)
-			goto out_close;
-		for (i = 0; i < nfds; i++) {
-			/* signal fd */
-			if (events[i].data.fd == sigfd) {
-				sread = read(sigfd, &fdsi, sizeof(fdsi));
-				if (sread != sizeof(fdsi))
-					goto out_close;
-				switch (fdsi.ssi_signo) {
-				case SIGINT:
-				case SIGTERM:
-				case SIGQUIT:
-					ret = 0;
-					goto out_close;
-				/* Unexpected signal */
-				default:
-					goto out_close;
-				}
-				/* timer fd */
-			} else if (events[i].data.fd == timerfd) {
-				sread = read(timerfd, &expirations, sizeof(uint64_t));
-				if (sread != sizeof(uint64_t))
-					goto out_close;
-				if (!expirations)
-					continue;
-				dump_all_adapter_data(ctx);
-				/* netlink fd */
-			} else if (events[i].data.fd == nlfd) {
-				link_mon_nl_waitfd_read(&ctx->lctx);
-			}
-		}
+		ret = monitor_epoll(ctx, mon_fds, epfd, sigfd, timerfd);
+		if (ret)
+			break;
 	}
 out_close:
+	/* Getting interrupted by a signal is not an error */
+	if (ret == -EINTR)
+		ret = 0;
 	close(epfd);
 	return ret;
 }
 
-static int monitor_mode(struct opticsmon_ctx *ctx)
+static void zpcimon_close_monitor(struct zpcimon_ctx *ctx)
+{
+	int i;
+
+	for (i = 0; i < (int)ARRAY_SIZE(monitors); i++) {
+		if (!monitors[i].ops->close_monitor || !monitors[i].opened)
+			continue;
+		monitors[i].ops->close_monitor(ctx);
+		monitors[i].opened = 0;
+	}
+}
+
+static int zpcimon_open_monitor(struct zpcimon_ctx *ctx)
+{
+	int i, ret = -ENXIO;
+
+	for (i = 0; i < (int)ARRAY_SIZE(monitors); i++) {
+		if (!monitors[i].ops->open_monitor || monitors[i].opened)
+			continue;
+		if (monitors[i].opened)
+			goto error;
+		ret = monitors[i].ops->open_monitor(ctx);
+		if (ret)
+			goto error;
+		monitors[i].opened = 1;
+	}
+	return 0;
+
+error:
+	zpcimon_close_monitor(ctx);
+	return ret;
+}
+
+static int monitor_mode(struct zpcimon_ctx *ctx)
 {
 	struct itimerspec timerspec;
 	int sigfd, timerfd, ret;
@@ -386,20 +341,67 @@ static int monitor_mode(struct opticsmon_ctx *ctx)
 	}
 
 	util_fmt_init(stdout, ctx->opts.format, FMT_DEFAULT, API_LEVEL);
-	ret = link_mon_nl_waitfd_create(&ctx->lctx, on_link_change, ctx);
-	if (ret) {
-		fprintf(stderr, "Failed to create link monitoring socket\n");
-		goto close_timerfd;
-	}
+	ret = zpcimon_open_monitor(ctx);
+	if (ret < 0)
+		goto cleanup_fmt;
 
 	ret = monitor_wait_loop(ctx, sigfd, timerfd);
 
-	link_mon_nl_waitfd_destroy(&ctx->lctx);
+	zpcimon_close_monitor(ctx);
+cleanup_fmt:
 	util_fmt_exit();
-close_signalfd:
-	close(sigfd);
 close_timerfd:
 	close(timerfd);
+close_signalfd:
+	close(sigfd);
+	return ret;
+}
+
+static int oneshot_mode(struct zpcimon_ctx *ctx)
+{
+	util_fmt_init(stdout, ctx->opts.format, FMT_DEFAULT, API_LEVEL);
+	if (!ctx->opts.quiet)
+		util_fmt_obj_start(FMT_LIST, "adapters");
+
+	collect_all_adapter_data(ctx);
+
+	if (!ctx->opts.quiet)
+		util_fmt_obj_end();
+	util_fmt_exit();
+
+	return EXIT_SUCCESS;
+}
+
+static void zpcimon_destroy(struct zpcimon_ctx *ctx)
+{
+	int i;
+
+	for (i = 0; i < (int)ARRAY_SIZE(monitors); i++) {
+		if (!monitors[i].ops->destroy || !monitors[i].initialized)
+			continue;
+		monitors[i].ops->destroy(ctx);
+		monitors[i].initialized = false;
+	}
+}
+
+static int zpcimon_init(struct zpcimon_ctx *ctx)
+{
+	int i, ret = -ENXIO;
+
+	for (i = 0; i < (int)ARRAY_SIZE(monitors); i++) {
+		if (!monitors[i].ops->init)
+			continue;
+		if (monitors[i].initialized)
+			goto error;
+		ret = monitors[i].ops->init(ctx);
+		if (ret)
+			goto error;
+		monitors[i].initialized = 1;
+	}
+	return 0;
+
+error:
+	zpcimon_destroy(ctx);
 	return ret;
 }
 
@@ -432,21 +434,21 @@ static int set_format(struct options *opts)
 
 int main(int argc, char **argv)
 {
-	struct opticsmon_ctx ctx = { .opts = { .interval_seconds = 86400 } };
+	struct zpcimon_ctx ctx = { .opts = { .interval_seconds = SEC_PER_DAY } };
 	int ret;
 
 	parse_cmdline(argc, argv, &ctx.opts);
 	ret = set_format(&ctx.opts);
 	if (ret)
 		return ret;
-	ret = ethtool_nl_connect(&ctx.ethtool_ctx);
+	ret = zpcimon_init(&ctx);
 	if (ret)
 		return ret;
 	if (ctx.opts.monitor)
 		ret = monitor_mode(&ctx);
 	else
 		ret = oneshot_mode(&ctx);
-	ethtool_nl_close(&ctx.ethtool_ctx);
+	zpcimon_destroy(&ctx);
 
 	if (ctx.zpci_list)
 		zpci_free_dev_list(ctx.zpci_list);
