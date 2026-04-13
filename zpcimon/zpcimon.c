@@ -24,6 +24,7 @@
 #include "lib/util_opt.h"
 #include "lib/util_fmt.h"
 #include "lib/util_libc.h"
+#include "lib/util_time.h"
 
 #include <openssl/evp.h>
 
@@ -102,7 +103,7 @@ static void parse_cmdline(int argc, char *argv[], struct options *opts)
 					optarg);
 				exit(EXIT_FAILURE);
 			}
-			if (seconds < 86400)
+			if (seconds < SEC_PER_DAY)
 				opts->interval_seconds = seconds;
 			if (seconds < 1)
 				opts->interval_seconds = 1;

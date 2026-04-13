@@ -19,6 +19,8 @@
 
 #define MSEC_PER_SEC	1000L
 
+#define SEC_PER_DAY	(24 * 60 * 60)
+
 /**
  * Convert nanoseconds to microseconds
  *
