@@ -398,7 +398,9 @@ int main(int argc, char **argv)
 	int ret;
 
 	parse_cmdline(argc, argv, &ctx.opts);
-	ethtool_nl_connect(&ctx.ethtool_ctx);
+	ret = ethtool_nl_connect(&ctx.ethtool_ctx);
+	if (ret)
+		return ret;
 	if (ctx.opts.monitor)
 		ret = monitor_mode(&ctx);
 	else

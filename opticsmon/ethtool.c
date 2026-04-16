@@ -56,13 +56,13 @@ int ethtool_nl_connect(struct ethtool_nl_ctx *ctx)
 	sk = nl_socket_alloc();
 	if (!sk) {
 		nl_perror(NLE_NOMEM, "alloc");
-		return EXIT_FAILURE;
+		return -ENOMEM;
 	}
 
 	rc = genl_connect(sk);
 	if (rc) {
 		nl_perror(rc, "connect");
-		rc = EXIT_FAILURE;
+		rc = -EIO;
 		goto err_free;
 	}
 
@@ -72,7 +72,7 @@ int ethtool_nl_connect(struct ethtool_nl_ctx *ctx)
 			fprintf(stderr, "Ethtool netlink family not found\n");
 		else
 			nl_perror(ethtool_id, "ctrl resolve");
-		rc = EXIT_FAILURE;
+		rc = -EIO;
 		goto err_close;
 	}
 	ctx->sk = sk;
