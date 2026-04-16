@@ -272,7 +272,7 @@ int ethtool_nl_get_optics(struct ethtool_nl_ctx *ctx, const char *netdev, struct
 	return rc;
 
 out_err_free_oi:
-	free(*oi);
+	optics_free(*oi);
 	*oi = NULL;
 	return rc;
 }
