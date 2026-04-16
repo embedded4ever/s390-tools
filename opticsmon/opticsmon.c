@@ -381,7 +381,7 @@ static int monitor_mode(struct opticsmon_ctx *ctx)
 		goto close_timerfd;
 	}
 
-	monitor_wait_loop(ctx, sigfd, timerfd);
+	ret = monitor_wait_loop(ctx, sigfd, timerfd);
 
 	link_mon_nl_waitfd_destroy(&ctx->lctx);
 	util_fmt_exit();
