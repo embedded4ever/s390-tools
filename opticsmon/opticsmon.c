@@ -271,54 +271,57 @@ void on_link_change(struct zpci_netdev *netdev, void *arg)
 static int monitor_wait_loop(struct opticsmon_ctx *ctx, int sigfd, int timerfd)
 {
 	struct epoll_event events[MAX_EVENTS];
+	int i, nlfd, epfd, nfds, ret = -EIO;
 	struct signalfd_siginfo fdsi;
-	int i, nlfd, epfd, nfds;
 	struct epoll_event ev;
 	uint64_t expirations;
 	ssize_t sread;
 
 	epfd = epoll_create1(EPOLL_CLOEXEC);
+	if (epfd < 0)
+		return -EIO;
 
 	ev.events = EPOLLIN;
 	ev.data.fd = sigfd;
 	if (epoll_ctl(epfd, EPOLL_CTL_ADD, sigfd, &ev) == -1)
-		return -EIO;
+		goto out_close;
 
 	ev.events = EPOLLIN;
 	ev.data.fd = timerfd;
 	if (epoll_ctl(epfd, EPOLL_CTL_ADD, timerfd, &ev) == -1)
-		return -EIO;
+		goto out_close;
 
 	nlfd = link_mon_nl_waitfd_getfd(&ctx->lctx);
 	ev.events = EPOLLIN;
 	ev.data.fd = nlfd;
 	if (epoll_ctl(epfd, EPOLL_CTL_ADD, nlfd, &ev) == -1)
-		return -EIO;
+		goto out_close;
 
 	while (1) {
 		nfds = epoll_wait(epfd, events, MAX_EVENTS, -1);
 		if (nfds < 0)
-			return nfds;
+			goto out_close;
 		for (i = 0; i < nfds; i++) {
 			/* signal fd */
 			if (events[i].data.fd == sigfd) {
 				sread = read(sigfd, &fdsi, sizeof(fdsi));
 				if (sread != sizeof(fdsi))
-					return -EIO;
+					goto out_close;
 				switch (fdsi.ssi_signo) {
 				case SIGINT:
 				case SIGTERM:
 				case SIGQUIT:
-					return 0;
+					ret = 0;
+					goto out_close;
 				/* Unexpected signal */
 				default:
-					return -EIO;
+					goto out_close;
 				}
 				/* timer fd */
 			} else if (events[i].data.fd == timerfd) {
 				sread = read(timerfd, &expirations, sizeof(uint64_t));
 				if (sread != sizeof(uint64_t))
-					return -EIO;
+					goto out_close;
 				if (!expirations)
 					continue;
 				dump_all_adapter_data(ctx);
@@ -328,7 +331,9 @@ static int monitor_wait_loop(struct opticsmon_ctx *ctx, int sigfd, int timerfd)
 			}
 		}
 	}
-	return 0;
+out_close:
+	close(epfd);
+	return ret;
 }
 
 static int monitor_mode(struct opticsmon_ctx *ctx)
