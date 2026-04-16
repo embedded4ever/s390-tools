@@ -143,7 +143,7 @@ static void optics_json_print(struct opticsmon_ctx *ctx, struct zpci_netdev *nd,
 	util_fmt_pair(FMT_QUOTE, "type", optics_type_str(optics_type(oi)));
 	util_fmt_pair(FMT_QUOTE, "rx_los", optics_los_str(optics_rx_los(oi)));
 	util_fmt_pair(FMT_QUOTE, "tx_los", optics_los_str(optics_tx_los(oi)));
-	util_fmt_pair(FMT_QUOTE, "tx_fault", optics_los_str(optics_rx_los(oi)));
+	util_fmt_pair(FMT_QUOTE, "tx_fault", optics_los_str(optics_tx_fault(oi)));
 	if (ctx->opts.module_info)
 		module_info_pair(oi);
 	util_fmt_obj_end();
