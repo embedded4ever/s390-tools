@@ -39,6 +39,16 @@ check_dep_libnvme:
 BUILDTARGET += check_dep_libnvme
 endif # HAVE_LIBNVME
 
+ifneq (${HAVE_LIBUDEV},0)
+check_dep_libudev:
+	$(call check_dep, \
+		"zpcimon", \
+		"libudev.h", \
+		"systemd-devel", \
+		"HAVE_LIBNVME=0")
+BUILDTARGET += check_dep_libudev
+endif # HAVE_LIBUDEV
+
 ifeq (${HAVE_OPENSSL},0)
 
 all:
@@ -61,6 +71,12 @@ all:
 install:
 	$(SKIP) HAVE_LIBNVME=0
 
+else ifeq (${HAVE_LIBUDEV},0)
+all:
+	$(SKIP) HAVE_LIBUDEV=0
+
+install:
+	$(SKIP) HAVE_LIBUDEV=0
 else
 
 ifneq ($(shell sh -c 'command -v pkg-config'),)
@@ -76,6 +92,7 @@ LIB_LFLAGS += $(shell $(PKG_CONFIG) --silence-errors --libs libnl-route-3.0)
 
 LIB_LFLAGS += $(shell $(PKG_CONFIG) --silence-errors --libs libcrypto)
 LIB_LFLAGS += $(shell $(PKG_CONFIG) --silence-errors --libs libnvme)
+LIB_LFLAGS += $(shell $(PKG_CONFIG) --silence-errors --libs libudev)
 else
 LIB_CFLAGS += -I /usr/include/libnl3/
 LIB_LFLAGS += -lnl-route-3 -lnl-genl-3 -lnl-3
@@ -84,6 +101,7 @@ LIB_CFLAGS += -I /usr/include/openssl/
 LIB_LFLAGS += -lcrypto
 
 LIB_LFLAGS += -lnvme
+LIB_LFLAGS += -ludev
 endif
 
 ALL_CPPFLAGS += $(LIB_CFLAGS)

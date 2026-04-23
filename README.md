@@ -325,7 +325,7 @@ build options:
 |              |                    | rust/pvattest, rust/pvsecret,          |
 | libxml2      | `HAVE_LIBXML2`     | libkmipclient                          |
 | systemd      | `HAVE_SYSTEMD`     | hsavmcore                              |
-| libudev      | `HAVE_LIBUDEV`     | cpacfstatsd                            |
+| libudev      | `HAVE_LIBUDEV`     | cpacfstatsd, zpcimon                   |
 | libnl3       | `HAVE_LIBNL3`      | zpcimon                                |
 | libnvme      | `HAVE_LIBNVME`     | zpcimon                                |
 

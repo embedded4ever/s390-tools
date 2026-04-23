@@ -15,6 +15,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <libnvme.h>
+#include <libudev.h>
 
 #include "lib/pci_list.h"
 #include "lib/pci_sclp.h"
@@ -195,6 +196,115 @@ exit_free_addr:
 	return rc;
 }
 
+static int nvmemon_open_monitor(struct zpcimon_ctx *ctx)
+{
+	struct nvmemon_ctx *nctx = &ctx->nvmemon_ctx;
+	int ret = -EINVAL;
+
+	nctx->udev = udev_new();
+	if (!nctx->udev)
+		return -ENOMEM;
+
+	nctx->mon = udev_monitor_new_from_netlink(nctx->udev, "kernel");
+	if (!nctx->mon) {
+		ret = -ENOMEM;
+		goto error_udev;
+	}
+
+	if (udev_monitor_filter_add_match_subsystem_devtype(nctx->mon, "nvme", NULL) < 0)
+		goto error_mon;
+
+	/* Note: This explicit udev_monitor_enable_receiving() is deprecated and not needed anymore
+	 * in udev v257+. It's harmless though so we do it for easier backporting.
+	 */
+	if (udev_monitor_enable_receiving(nctx->mon) < 0)
+		goto error_mon;
+
+	return 0;
+
+error_mon:
+	udev_monitor_unref(nctx->mon);
+	nctx->mon = NULL;
+error_udev:
+	udev_unref(nctx->udev);
+	nctx->udev = NULL;
+	return ret;
+}
+
+static int nvmemon_get_monitor_fd(struct zpcimon_ctx *ctx)
+{
+	struct nvmemon_ctx *nctx = &ctx->nvmemon_ctx;
+
+	if (!nctx->mon)
+		return -1;
+	return udev_monitor_get_fd(nctx->mon);
+}
+
+static void nvmemon_monitor_fd_handle(struct zpcimon_ctx *ctx)
+{
+	const char *action, *transport, *event_pci_addr;
+	struct nvmemon_ctx *nctx = &ctx->nvmemon_ctx;
+	struct udev_device *dev, *pci_dev;
+	struct zpci_dev *zdev;
+	char *zdev_pci_addr;
+
+	dev = udev_monitor_receive_device(nctx->mon);
+	if (!dev)
+		return;
+
+	action = udev_device_get_action(dev);
+	transport = udev_device_get_property_value(dev, "NVME_TRTYPE");
+
+	/* Change events are late enough that the /dev/nvmeX is ready for
+	 * reading SMART data and we're only interested in directly PCIe
+	 * attached NVMes
+	 */
+	if (action && strcmp(action, "change") == 0 && transport &&
+	    strcmp(transport, "pcie") == 0) {
+		pci_dev = udev_device_get_parent_with_subsystem_devtype(dev, "pci", NULL);
+		if (!pci_dev)
+			goto out;
+		event_pci_addr = udev_device_get_sysname(pci_dev);
+		if (!event_pci_addr)
+			goto out;
+
+		zpci_list_reload(&ctx->zpci_list);
+		if (ctx->zpci_list) {
+			util_list_iterate(ctx->zpci_list, zdev) {
+				if (zdev->pft != ZPCI_PFT_NVME)
+					continue;
+				zdev_pci_addr = zpci_pci_addr(zdev);
+				if (strcmp(zdev_pci_addr, event_pci_addr) == 0) {
+					free(zdev_pci_addr);
+					nvmemon_collect_adapter_data(ctx, zdev);
+					break;
+				}
+				free(zdev_pci_addr);
+			}
+		}
+	}
+out:
+	udev_device_unref(dev);
+}
+
+static void nvmemon_close_monitor(struct zpcimon_ctx *ctx)
+{
+	struct nvmemon_ctx *nctx = &ctx->nvmemon_ctx;
+
+	if (nctx->mon) {
+		udev_monitor_unref(nctx->mon);
+		nctx->mon = NULL;
+	}
+	if (nctx->udev) {
+		udev_unref(nctx->udev);
+		nctx->udev = NULL;
+	}
+}
+
 const struct zpcimon_ops nvmemon_ops = {
 	.collect_adapter_data = nvmemon_collect_adapter_data,
+	.open_monitor = nvmemon_open_monitor,
+	.get_monitor_fd = nvmemon_get_monitor_fd,
+	.monitor_fd_handle = nvmemon_monitor_fd_handle,
+	.close_monitor = nvmemon_close_monitor,
 };
