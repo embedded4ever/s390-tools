@@ -12,13 +12,17 @@ static void zpci_print(struct zpci_dev *zdev)
 	int i;
 
 	if (!zdev->conf) {
-		printf("fid: %8x address: %s\n", zdev->fid, pci_addr);
+		printf("fid:\t%4x address: %s\n", zdev->fid, pci_addr);
 	} else {
-		printf("fid: %8x address: %s uid: %4x%s pchid: %4x vfn: %4d port: %1d pft: %s ",
+		printf("fid:\t%4x address: %s uid: %4x%s pchid: %4x vfn: %4d\n",
 		       zdev->fid, pci_addr, zdev->uid, (zdev->uid_is_unique) ? " (unique)" : "",
-		       zdev->pchid, zdev->vfn, zdev->port, zpci_pft_str(zdev));
+		       zdev->pchid, zdev->vfn);
+		printf("\n");
+		printf("\tport: %1d pft: %s subsystem_device: %4x subsystem_vendor: %4x\n",
+		       zdev->port, zpci_pft_str(zdev), zdev->subsystem_device,
+		       zdev->subsystem_vendor);
 		if (zdev->num_netdevs) {
-			printf("netdevs: ");
+			printf("\tnetdevs: ");
 			for (i = 0; i < zdev->num_netdevs; i++) {
 				printf("%s (%s)", zdev->netdevs[i].name,
 				       zpci_operstate_str(zdev->netdevs[i].operstate));

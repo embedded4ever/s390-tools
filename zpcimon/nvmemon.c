@@ -144,7 +144,7 @@ static int sclp_issue_nvme_smart_report(struct zpci_dev *zdev, const uint8_t *sm
 	char *pci_addr;
 	int rc;
 
-	if (zdev->pft != ZPCI_PFT_NVME)
+	if (zdev->pft != ZPCI_PFT_NVME || zdev->subsystem_vendor != PCI_VENDOR_ID_IBM)
 		return -ENOTSUP;
 	pci_addr = zpci_pci_addr(zdev);
 	rc = zpci_sclp_issue_action(pci_addr, SCLP_ERRNOTIFY_AQ_NVME_SMART_DATA,

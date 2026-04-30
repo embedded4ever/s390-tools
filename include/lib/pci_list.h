@@ -18,6 +18,7 @@
 #include "util_list.h"
 
 #define PCI_BDF_LEN 13 /* DDDD:BB:dd.f\0 */
+#define PCI_VENDOR_ID_IBM 0x1014
 
 enum zpci_pft {
 	ZPCI_PFT_UNCLASSIFIED = 0x00,
@@ -67,6 +68,9 @@ struct zpci_dev {
 	bool uid_is_unique;
 	/* Configuration state 0 - Standby, 1 Configured */
 	bool conf;
+	/* Common PCI attributes */
+	uint16_t subsystem_vendor;
+	uint16_t subsystem_device;
 
 	/* Associated netdevs if any */
 	int num_netdevs;

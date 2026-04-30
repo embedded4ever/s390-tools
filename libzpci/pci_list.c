@@ -262,6 +262,16 @@ static int zpci_populate_from_dev_dir(struct zpci_dev *zdev)
 		goto out_path;
 	zdev->pft = val;
 
+	rc = util_file_read_i(&val, 16, "%s/subsystem_device", path);
+	if (rc)
+		goto out_path;
+	zdev->subsystem_device = val;
+
+	rc = util_file_read_i(&val, 16, "%s/subsystem_vendor", path);
+	if (rc)
+		goto out_path;
+	zdev->subsystem_vendor = val;
+
 	if (util_path_is_readable("%s/net", path)) {
 		rc = zpci_populate_netdevices(zdev, path);
 		if (rc)
