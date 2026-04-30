@@ -66,7 +66,7 @@ bool optics_los_implemented(struct optics *oi)
 	} else if (type == OPTICS_TYPE_QSFP28) {
 		if (oi->size < OPTICS_QSFP28_LOS_OFFSET + 1)
 			return false;
-		if (oi->size < OPTICS_QSFP28_LOS_IMPLEMENTED_OFFSET)
+		if (oi->size < OPTICS_QSFP28_LOS_IMPLEMENTED_OFFSET + 1)
 			return false;
 		implemented = oi->raw[OPTICS_QSFP28_LOS_IMPLEMENTED_OFFSET];
 		/*
