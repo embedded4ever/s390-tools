@@ -96,6 +96,8 @@ static void parse_cmdline(int argc, char *argv[], struct options *opts)
 			}
 			if (seconds < 86400)
 				opts->interval_seconds = seconds;
+			if (seconds < 1)
+				opts->interval_seconds = 1;
 			break;
 		case 'h':
 			util_prg_print_help();
