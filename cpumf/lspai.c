@@ -277,6 +277,9 @@ static void list_painode(void)
 			indent = MAX((size_t)indent, strlen(node->ctrlist[i].name));
 	}
 
+	/* Ensure minimum indent for proper column alignment */
+	indent = MAX(indent, 5);
+
 	printf("RAW %*s NAME %*s DESCRIPTION\n", 3, "", indent - 5, "");
 	util_list_iterate(&pai_list, node) {
 		for (int i = 0; i < node->ctridx; ++i) {
