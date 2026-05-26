@@ -3747,7 +3747,7 @@ static struct counters cpumcf_z17_counters[] = {
 static void set_prefix(int nr)
 {
 	if (nr == PERF_TYPE_RAW)
-		strcat(prefix, "r");
+		snprintf(prefix, sizeof(prefix), "r");
 	else
 		snprintf(prefix, sizeof(prefix), "%d:", nr);
 }
