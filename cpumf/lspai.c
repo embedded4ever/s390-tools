@@ -559,8 +559,15 @@ static int event_add(int cpu, int idx, struct pai_node *node)
 	attr.config = node->ctrlist[idx].nr;
 	attr.type = node->pmu;
 	fd = perf_event_open(&attr, -1, cpu, -1, 0);
-	if (fd == -1)
-		err(EXIT_FAILURE, "Failed to open perf event: file descriptor not available");
+	if (fd == -1) {
+		/* Handle CPU going offline gracefully */
+		if (errno == ENODEV || errno == ENXIO) {
+			warnx("CPU %d is offline or unavailable, skipping", cpu);
+			return -1;
+		}
+		err(EXIT_FAILURE, "Failed to open perf event on CPU %d: %s",
+		    cpu, strerror(errno));
+	}
 	return fd;
 }
 
@@ -599,8 +606,11 @@ static void event_painode(void)
 			data = node->ctrlist[i].data;
 			for (unsigned int j = 0; j < CPU_SETSIZE; ++j) {
 				if (CPU_ISSET(j, &cpu_online_mask)) {
+					int fd = event_add(j, i, node);
+					if (fd == -1)
+						continue;
 					data->cpu = j;
-					data->fd = event_add(j, i, node);
+					data->fd = fd;
 					data->value = 0;
 					data->prev_value = 0;
 					++data;
