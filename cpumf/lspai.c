@@ -186,6 +186,7 @@ static void read_counternames(struct pai_node *node)
 	if (count <= 0)
 		errx(EXIT_FAILURE, "Cannot open %s", path);
 
+	/* Allocate for maximum possible entries, will shrink later if needed */
 	node->ctrsize = count * sizeof(*node->ctrlist);
 	node->ctrlist = util_malloc(node->ctrsize);
 	for (i = 0; i < count && ctr >= 0; i++) {
@@ -196,20 +197,35 @@ static void read_counternames(struct pai_node *node)
 			if (!ctr_in_list(sname, ctrlist) &&
 			    !ctr_in_list(namelist[i]->d_name, ctrlist)) {
 				/* Counter not listed in --counters option */
+				free(ctrpath);
 				continue;
 			}
 			node->ctrlist[node->ctridx].data = NULL;
 			node->ctrlist[node->ctridx].name = util_strdup(namelist[i]->d_name);
+			if (!node->ctrlist[node->ctridx].name)
+				err(EXIT_FAILURE, "Failed to allocate memory for counter name");
 			node->ctrlist[node->ctridx++].nr = ctr;
 			more++;
 			max_fds++;
 		} else {
-			warnx("Cannot parse %s", ctrpath);
+			warnx("Cannot parse event number from %s (expected format: event=0xNNN)",
+			      ctrpath);
 		}
 		free(ctrpath);
 	}
 	util_scandir_free(namelist, count);
 	free(path);
+
+	/* Shrink allocation to actual size used */
+	if (node->ctridx < count) {
+		node->ctrsize = node->ctridx * sizeof(*node->ctrlist);
+		if (node->ctridx > 0)
+			node->ctrlist = util_realloc(node->ctrlist, node->ctrsize);
+		else {
+			free(node->ctrlist);
+			node->ctrlist = NULL;
+		}
+	}
 
 	if (numsort && more > 1)
 		qsort(node->ctrlist, more, sizeof(*node->ctrlist), pai_ctrcmp);
