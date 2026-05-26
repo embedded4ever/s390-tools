@@ -548,11 +548,18 @@ static int event_add(int cpu, int idx, struct pai_node *node)
 /* Increase number of file descriptors this process can open. */
 static void event_fdlimit(void)
 {
-	unsigned int needed = 3 + max_fds * max_cpus;
+	unsigned int needed;
 	struct rlimit rlimit;
+
+	if (__builtin_mul_overflow(max_fds, max_cpus, &needed) ||
+	    __builtin_add_overflow(needed, 3U, &needed))
+		errx(EXIT_FAILURE, "Too many file descriptors needed");
 
 	if (getrlimit(RLIMIT_NOFILE, &rlimit) == -1)
 		err(EXIT_FAILURE, "Failed to read RLIMIT_NOFILE");
+	if (needed > rlimit.rlim_max)
+		errx(EXIT_FAILURE, "Required FDs (%u) exceeds hard limit (%lu)",
+		     needed, (unsigned long)rlimit.rlim_max);
 	if (needed > rlimit.rlim_cur)
 		rlimit.rlim_cur = needed;
 	if (setrlimit(RLIMIT_NOFILE, &rlimit) == -1)
