@@ -718,6 +718,10 @@ int main(int argc, char **argv)
 			read_interval = strtoul(optarg, &endchar, 0);
 			if (errno || *endchar)
 				errx(EXIT_FAILURE, "Invalid argument for -%c", ch);
+			if (read_interval == 0)
+				errx(EXIT_FAILURE, "Interval must be greater than 0");
+			if (read_interval > 86400)
+				warnx("Very large interval specified: %lu seconds", read_interval);
 			break;
 		case 'l':
 			l_flag = true;
