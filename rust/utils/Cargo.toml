@@ -12,5 +12,7 @@ log = { version = "0.4.29", features = ["std", "release_max_level_debug"] }
 pv = { path = "../pv", package = "s390_pv" }
 serde = { version = "1.0.228"}
 
+utils_macros = { path = "../utils_macros" }
+
 [dev-dependencies]
 serde_json = "1.0.149"

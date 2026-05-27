@@ -11,6 +11,7 @@ members = [
 	"pvsecret",
 	"pvverify",
 	"utils",
+	"utils_macros",
 ]
 resolver = "2"
 

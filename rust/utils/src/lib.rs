@@ -13,6 +13,8 @@ mod log;
 mod tmpfile;
 
 pub use ::log::LevelFilter;
+// Re-export procedural macros from utils_macros
+pub use utils_macros::{ValueEnumDisplay, ValueEnumFromStr};
 
 pub use crate::cli::{
     combined_path_opt, combined_path_req, get_reader_from_cli_file_arg,

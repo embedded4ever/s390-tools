@@ -1225,6 +1225,17 @@ dependencies = [
  "s390_pv",
  "serde",
  "serde_json",
+ "utils_macros",
+]
+
+[[package]]
+name = "utils_macros"
+version = "0.12.0"
+dependencies = [
+ "clap",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
