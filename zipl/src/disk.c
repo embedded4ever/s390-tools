@@ -176,6 +176,15 @@ out_err:
 	return rc;
 }
 
+#define GET_TARGET_OR_GOTO_ERR()					\
+	do {								\
+		if (target_id < 0)					\
+			goto err_inc;					\
+		t = target_at(td, target_id);				\
+		if (!t)							\
+			goto err_exc;					\
+	} while (0)
+
 /**
  * Process a script output represented by FH and consisting
  * of pairs 'key=value' (each such pair is on a separate line).
@@ -189,57 +198,46 @@ out_err:
  */
 static int set_target_parameters(FILE *fh, struct job_target_data *td)
 {
-	int idx[LAST_TARGET_PARAM] = {0};
+	int target_id = -1;
 	struct target *t;
 	char buffer[80];
 	char value[40];
-	char *error;
 	int i;
 
 	/* reset array of target parameters */
 	memset(td->targets, 0, sizeof(td->targets));
-	/**
-	 * Process a stream of 'key=value' pairs and distribute
-	 * them into groups.
-	 * The i-th occurrence of some "key" in the stream means
-	 * that the respective pair belongs to the group #i
+	/*
+	 * Process a stream of key-value pairs and complete the array of
+	 * target parameters.
+	 * Each key-value pair "targetbase=foo" title a group of parameters
+	 * for a new target.
 	 */
-	error = "Exceeded the maximum number of base disks";
 	while (fgets(buffer, 80, fh)) {
 		if (sscanf(buffer, "targetbase=%s", value) == 1) {
-			t = target_at(td, idx[TARGET_BASE]++);
-			if (!t)
-				goto error;
+			target_id++; /* new title */
+			GET_TARGET_OR_GOTO_ERR();
 			t->targetbase = misc_strdup(value);
 			goto found;
 		}
 		if (sscanf(buffer, "targettype=%s", value) == 1) {
-			t = target_at(td, idx[TARGET_TYPE]++);
-			if (!t)
-				goto error;
+			GET_TARGET_OR_GOTO_ERR();
 			type_from_target(value,	&t->targettype);
 			goto found;
 		}
 		if (sscanf(buffer, "targetgeometry=%s", value) == 1) {
-			t = target_at(td, idx[TARGET_GEOMETRY]++);
-			if (!t)
-				goto error;
+			GET_TARGET_OR_GOTO_ERR();
 			t->targetcylinders = atoi(strtok(value, ","));
 			t->targetheads = atoi(strtok(NULL, ","));
 			t->targetsectors = atoi(strtok(NULL, ","));
 			goto found;
 		}
 		if (sscanf(buffer, "targetblocksize=%s", value) == 1) {
-			t = target_at(td, idx[TARGET_BLOCKSIZE]++);
-			if (!t)
-				goto error;
+			GET_TARGET_OR_GOTO_ERR();
 			t->targetblocksize = atoi(value);
 			goto found;
 		}
 		if (sscanf(buffer, "targetoffset=%s", value) == 1) {
-			t = target_at(td, idx[TARGET_OFFSET]++);
-			if (!t)
-				goto error;
+			GET_TARGET_OR_GOTO_ERR();
 			t->targetoffset = atol(value);
 			goto found;
 		}
@@ -247,43 +245,26 @@ static int set_target_parameters(FILE *fh, struct job_target_data *td)
 found:
 		t->check_params++;
 	}
+	td->nr_targets = target_id + 1;
 	/* Check for consistency */
-	error = "Inconsistent script output";
-	/*
-	 * First, calculate total number of groups
-	 */
-	td->nr_targets = 0;
-	for (i = 0; i < MAX_TARGETS; i++) {
-		t = target_at(td, i);
-		if (t->check_params == 0)
-			break;
-		td->nr_targets++;
-	}
 	if (!td->nr_targets)
-		/* No keywords found in the stream */
-		goto error;
+		/* Missed a title pair "targetbase=foo" in the stream */
+		goto err_inc;
 	/*
-	 * Each group has to include targetbase, targettype,
-	 * targetblocksize and targetoffset.
-	 */
-	if (td->nr_targets != idx[TARGET_BASE] ||
-	    td->nr_targets != idx[TARGET_TYPE] ||
-	    td->nr_targets != idx[TARGET_BLOCKSIZE] ||
-	    td->nr_targets != idx[TARGET_OFFSET])
-		goto error;
-	/*
-	 * In addition, any group of "ECKD" type has to include
-	 * targetgeometry
+	 * Any group of "ECKD" type has to include targetgeometry
 	 */
 	for (i = 0; i < td->nr_targets; i++) {
 		t = target_at(td, i);
 		assert(t->check_params >= 4);
 		if (disk_type_is_eckd(t->targettype) && t->check_params != 5)
-			goto error;
+			goto err_inc;
 	}
 	return 0;
-error:
-	error_reason("%s", error);
+err_inc:
+	error_reason("%s", "Inconsistent script output");
+	return -1;
+err_exc:
+	error_reason("%s", "Exceeded the maximum number of base disks");
 	return -1;
 }
 

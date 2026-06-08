@@ -167,7 +167,7 @@ struct job_data {
 static inline struct target *target_at(struct job_target_data *data,
 				       int index)
 {
-	return index >= MAX_TARGETS ? NULL : &data->targets[index];
+	return index < 0 || index >= MAX_TARGETS ? NULL : &data->targets[index];
 }
 
 static inline char *get_targetbase(struct job_target_data *data, int index)
