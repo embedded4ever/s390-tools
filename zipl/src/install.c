@@ -172,7 +172,7 @@ install_fba_ccw(int fd, disk_blockptr_t *program_table,
 int
 install_eckd_stage1b(struct misc_fd *mfd, disk_blockptr_t **stage1b_list,
 		     blocknum_t *stage1b_count, disk_blockptr_t *stage2_list,
-		     blocknum_t stage2_count, int fs_block_size,
+		     blocknum_t stage2_count, int fs_block_size, int align,
 		     struct disk_info *info)
 {
 	struct boot_eckd_stage1b *stage1b;
@@ -189,7 +189,7 @@ install_eckd_stage1b(struct misc_fd *mfd, disk_blockptr_t **stage1b_list,
 		goto out_free_stage1b;
 	*stage1b_count = disk_write_block_buffer(mfd, 1, stage1b, stage1b_size,
 						 stage1b_list, fs_block_size,
-						 info);
+						 align, info);
 	if (*stage1b_count == 0)
 		goto out_free_stage1b;
 	rc = 0;
@@ -855,7 +855,7 @@ static void eckd_dump_store_param(struct eckd_dump_param *param,
 
 static int
 install_svdump_eckd_ldl(struct misc_fd *mfd, int fs_block_size,
-			struct disk_info *info,
+			int align, struct disk_info *info,
 			const struct stage2dump_parm_tail *stage2dump_parms)
 {
 	disk_blockptr_t *stage2_list, *stage1b_list;
@@ -879,13 +879,13 @@ install_svdump_eckd_ldl(struct misc_fd *mfd, int fs_block_size,
 	if (misc_seek(mfd->fd, info->geo.start * info->phy_block_size))
 		goto out_free_stage2;
 	stage2_count = disk_write_block_buffer(mfd, 1, stage2, stage2_size,
-					       &stage2_list,
-					       fs_block_size, info);
+					       &stage2_list, fs_block_size,
+					       align, info);
 	if (stage2_count == 0)
 		goto out_free_stage2_list;
 	if (install_eckd_stage1b(mfd, &stage1b_list, &stage1b_count,
 				 stage2_list, stage2_count, fs_block_size,
-				 info))
+				 align, info))
 		goto out_free_stage2_list;
 	/* Install stage 0 - afterwards we are at stage 1 position*/
 	boot_init_eckd_ldl_stage0(&stage0);
@@ -913,8 +913,8 @@ out:
 }
 
 static int install_dump_eckd_cdl(struct misc_fd *mfd, int fs_block_size,
-				 struct disk_info *info, void *stage2,
-				 size_t stage2_size, int mvdump,
+				 int align, struct disk_info *info,
+				 void *stage2, size_t stage2_size, int mvdump,
 				 int force)
 {
 	blocknum_t count, stage2_count, stage1b_count;
@@ -939,13 +939,13 @@ static int install_dump_eckd_cdl(struct misc_fd *mfd, int fs_block_size,
 		goto out;
 	stage2_count = disk_write_block_buffer(mfd, 1, stage2, stage2_size,
 					       &stage2_list, fs_block_size,
-					       info);
+					       align, info);
 	if (stage2_count == 0)
 		goto out;
 	/* Install stage 1b behind stage 2*/
 	if (install_eckd_stage1b(mfd, &stage1b_list, &stage1b_count,
 				 stage2_list, stage2_count, fs_block_size,
-				 info))
+				 align, info))
 		goto out_free_stage2_list;
 	/* Install stage 0 */
 	boot_init_eckd_cdl_stage0(&stage0_cdl);
@@ -973,7 +973,7 @@ out:
 
 static int
 install_svdump_eckd_cdl(struct misc_fd *mfd, int fs_block_size,
-			struct disk_info *info,
+			int align, struct disk_info *info,
 			const struct stage2dump_parm_tail *stage2dump_parms)
 {
 	size_t stage2_size;
@@ -982,7 +982,7 @@ install_svdump_eckd_cdl(struct misc_fd *mfd, int fs_block_size,
 
 	if (boot_get_eckd_dump_stage2(&stage2, &stage2_size, stage2dump_parms))
 		return -1;
-	rc = install_dump_eckd_cdl(mfd, fs_block_size,
+	rc = install_dump_eckd_cdl(mfd, fs_block_size, align,
 				   info, stage2, stage2_size, 0, 0);
 	free(stage2);
 	return rc;
@@ -990,7 +990,7 @@ install_svdump_eckd_cdl(struct misc_fd *mfd, int fs_block_size,
 
 static int
 install_mvdump_eckd_cdl(struct misc_fd *mfd, int fs_block_size,
-			struct disk_info *info,
+			int align, struct disk_info *info,
 			const struct stage2dump_parm_tail *stage2dump_parms,
 			const struct mvdump_parm_table *mv_parm_table)
 {
@@ -1002,7 +1002,7 @@ install_mvdump_eckd_cdl(struct misc_fd *mfd, int fs_block_size,
 	if (boot_get_eckd_mvdump_stage2(&stage2, &stage2_size, stage2dump_parms,
 					mv_parm_table))
 		return -1;
-	rc = install_dump_eckd_cdl(mfd, fs_block_size, info, stage2,
+	rc = install_dump_eckd_cdl(mfd, fs_block_size, align, info, stage2,
 				   stage2_size, 1,
 				   stage2dump_parms->mvdump_force);
 	free(stage2);
@@ -1012,7 +1012,7 @@ install_mvdump_eckd_cdl(struct misc_fd *mfd, int fs_block_size,
 int
 install_fba_stage1b(struct misc_fd *mfd, disk_blockptr_t **stage1b_list,
 		    blocknum_t *stage1b_count, disk_blockptr_t *stage2_list,
-		    blocknum_t stage2_count, int fs_block_size,
+		    blocknum_t stage2_count, int fs_block_size, int align,
 		    struct disk_info *info)
 {
 	struct boot_fba_stage1b *stage1b;
@@ -1029,7 +1029,7 @@ install_fba_stage1b(struct misc_fd *mfd, disk_blockptr_t **stage1b_list,
 		goto out_free_stage1b;
 	*stage1b_count = disk_write_block_buffer(mfd, 1, stage1b, stage1b_size,
 						 stage1b_list, fs_block_size,
-						 info);
+						 align, info);
 	if (*stage1b_count == 0)
 		goto out_free_stage1b;
 	rc = 0;
@@ -1041,7 +1041,7 @@ out:
 
 static int
 install_svdump_fba(struct misc_fd *mfd, int fs_block_size,
-		   struct disk_info *info,
+		   int align, struct disk_info *info,
 		   const struct stage2dump_parm_tail *stage2dump_parms)
 {
 	blocknum_t stage1b_count, stage2_count, blk;
@@ -1067,7 +1067,7 @@ install_svdump_fba(struct misc_fd *mfd, int fs_block_size,
 		goto out_free_stage2;
 	stage2_count = disk_write_block_buffer(mfd, 1, stage2, stage2_size,
 					       &stage2_list, fs_block_size,
-					       info);
+					       align, info);
 	if (stage2_count == 0)
 		goto out_free_stage2;
 	/* Install stage 1b in front of stage 2 */
@@ -1075,7 +1075,8 @@ install_svdump_fba(struct misc_fd *mfd, int fs_block_size,
 	if (misc_seek(mfd->fd, blk * info->phy_block_size))
 		goto out_free_stage2_list;
 	if (install_fba_stage1b(mfd, &stage1b_list, &stage1b_count,
-				stage2_list, stage2_count, fs_block_size, info))
+				stage2_list, stage2_count, fs_block_size,
+				align, info))
 		goto out_free_stage2_list;
 	/* Install stage 0/1 fill in dump partition parameter */
 	if (boot_init_fba_stage0(&stage0, stage1b_list, stage1b_count))
@@ -1219,14 +1220,17 @@ install_dump(const char *device, struct job_target_data *target, uint64_t mem,
 		if (info->type == disk_type_eckd_ldl)
 			rc = install_svdump_eckd_ldl(&mfd,
 						     dev_info->fs_block_size,
-						     info, &stage2dump_parms);
+						     dev_info->align, info,
+						     &stage2dump_parms);
 		else if (info->type == disk_type_eckd_cdl)
 			rc = install_svdump_eckd_cdl(&mfd,
 						     dev_info->fs_block_size,
-						     info, &stage2dump_parms);
+						     dev_info->align, info,
+						     &stage2dump_parms);
 		else
 			rc = install_svdump_fba(&mfd, dev_info->fs_block_size,
-						info, &stage2dump_parms);
+						dev_info->align, info,
+						&stage2dump_parms);
 		break;
 	case disk_type_scsi:
 		error_reason("%s: Unsupported disk type '%s' (try --dumptofs)",
@@ -1382,8 +1386,8 @@ install_mvdump(char* const device[], struct job_target_data* target, int count,
 			printf("Installing dump record on target partition "
 			       "'%s'\n", device[i]);
 		rc = install_mvdump_eckd_cdl(&mfd, dev_info[i]->fs_block_size,
-					     info[i], &stage2dump_parms,
-					     &mvdump_parms);
+					     dev_info[i]->align, info[i],
+					     &stage2dump_parms, &mvdump_parms);
 		misc_free_temp_dev(tempdev);
 
 		if (fsync(mfd.fd))

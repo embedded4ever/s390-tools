@@ -93,6 +93,7 @@ struct device_info {
 			 * as retrieved from "/proc/devices", or evaluated
 			 */
 	int fs_block_size;
+	int align; /* alignment of component location in bootmap */
 	struct disk_info base[MAX_TARGETS]; /* array of physical disks for
 					     * bootstrap blocks recording
 					     */
@@ -133,13 +134,13 @@ int disk_write_block_aligned(struct misc_fd *mfd, const void *data,
 blocknum_t disk_write_block_buffer(struct misc_fd *fd, int fd_is_basedisk,
 				   const void* buffer, size_t bytecount,
 				   disk_blockptr_t** blocklist,
-				   int fs_block_size, struct disk_info *info);
+				   int fs_block_size, int align,
+				   struct disk_info *info);
 blocknum_t disk_write_block_buffer_align(struct misc_fd *mfd, int fd_is_basedisk,
 					 const void *buffer, size_t bytecount,
 					 disk_blockptr_t **blocklist,
-					 int fs_block_size,
-					 struct disk_info *info, int align,
-					 off_t *offset);
+					 int fs_block_size, int align,
+					 struct disk_info *info, off_t *offset);
 void disk_print_devt(dev_t d);
 void disk_print_devname(dev_t d);
 void prepare_footnote_ptr(int source, char *ptr);

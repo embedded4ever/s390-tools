@@ -160,13 +160,13 @@ int install_mvdump(char* const device[], struct job_target_data* target,
 
 int install_fba_stage1b(struct misc_fd *mfd, disk_blockptr_t **stage1b_list,
 			blocknum_t *stage1b_count, disk_blockptr_t *stage2_list,
-			blocknum_t stage2_count, int fs_block_size,
+			blocknum_t stage2_count, int fs_block_size, int align,
 			struct disk_info *info);
 int install_eckd_stage1b(struct misc_fd *mfd, disk_blockptr_t **stage1b_list,
 			 blocknum_t *stage1b_count,
 			 disk_blockptr_t *stage2_list,
 			 blocknum_t stage2_count, int fs_block_size,
-			 struct disk_info *info);
+			 int align, struct disk_info *info);
 int rewind_tape(int fd);
 
 #endif /* INSTALL_H */

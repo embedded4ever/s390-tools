@@ -575,7 +575,21 @@ static int disk_set_info_complete(struct job_target_data *td,
 	return 0;
 }
 
-static int device_set_info_complete(struct device_info *dev_info)
+static void device_get_alignment(struct device_info *dev_info,
+				 struct job_target_data *td)
+{
+	struct disk_info *base;
+	int i;
+
+	for (i = 0; i < td->nr_targets; i++) {
+		base = &dev_info->base[i];
+		if (dev_info->align < base->phy_block_size)
+			dev_info->align = base->phy_block_size;
+	}
+}
+
+static int device_set_info_complete(struct device_info *dev_info,
+				    struct job_target_data *td)
 {
 	struct util_proc_part_entry part_entry;
 
@@ -588,6 +602,7 @@ static int device_set_info_complete(struct device_info *dev_info)
 	}
 	/* Initialize file system block size with invalid value */
 	dev_info->fs_block_size = -1;
+	device_get_alignment(dev_info, td);
 	return 0;
 }
 
@@ -689,7 +704,7 @@ int device_get_info(const char *device, struct job_target_data *td,
 		if (disk_set_info_complete(td, &data->base[i], &stats, fd))
 			goto error;
 	}
-	if (device_set_info_complete(data))
+	if (device_set_info_complete(data, td))
 		goto error;
 	free(script_file);
 	close(fd);
@@ -1017,7 +1032,7 @@ blocknum_t
 disk_write_block_buffer_align(struct misc_fd *mfd, int fd_is_basedisk,
 			      const void *buffer, size_t bytecount,
 			      disk_blockptr_t **blocklist, int fs_block_size,
-			      struct disk_info *info, int align, off_t *offset)
+			      int align, struct disk_info *info, off_t *offset)
 {
 	blocknum_t count;
 	blocknum_t i;
@@ -1058,12 +1073,12 @@ blocknum_t
 disk_write_block_buffer(struct misc_fd *mfd, int fd_is_basedisk,
 			const void *buffer, size_t bytecount,
 			disk_blockptr_t **blocklist, int fs_block_size,
-			struct disk_info *info)
+			int align, struct disk_info *info)
 {
 	return disk_write_block_buffer_align(mfd, fd_is_basedisk, buffer,
 					     bytecount, blocklist,
-					     fs_block_size, info,
-					     info->phy_block_size, NULL);
+					     fs_block_size, align, info,
+					     NULL);
 }
 
 /* Print device node. */

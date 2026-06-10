@@ -383,8 +383,8 @@ static int add_component_file_range(struct install_set *bis,
 						       0 /* not a base disk */,
 						       buffer, size, list,
 						       bis->info->fs_block_size,
+						       bis->info->align,
 						       info,
-						       info->phy_block_size,
 						       /*
 							* save component offset
 							*/
@@ -478,7 +478,7 @@ static int add_component_buffer_base(struct install_set *bis, void *buffer,
 
 	align = fs_block_aligned_by_id(comp_id) ?
 		bis->info->fs_block_size :
-		info->phy_block_size;
+		bis->info->align;
 
 	if (bis->skip_prepare_device &&
 	    bis->mirrors[mirror_id].skip_prepare_blocklist)
@@ -486,8 +486,8 @@ static int add_component_buffer_base(struct install_set *bis, void *buffer,
 		goto write_segment_table;
 	/* Write buffer */
 	*count = disk_write_block_buffer_align(&bis->mfd, 0, buffer, size, list,
-					       bis->info->fs_block_size,
-					       info, align, &offset);
+					       bis->info->fs_block_size, align,
+					       info, &offset);
 	if (*count == 0) {
 		error_text("Could not write to bootmap file");
 		return -1;
@@ -1265,7 +1265,7 @@ write_empty_block(struct misc_fd *mfd, disk_blockptr_t *block,
 
 static int install_stages_dasd_fba(struct misc_fd *mfd, char *filename,
 				   struct job_data *job,
-				   int fs_block_size,
+				   int fs_block_size, int align,
 				   struct disk_info *info,
 				   disk_blockptr_t **stage1b_list,
 				   blocknum_t *stage1b_count,
@@ -1289,6 +1289,7 @@ static int install_stages_dasd_fba(struct misc_fd *mfd, char *filename,
 						       stage2_size,
 						       &stage2_list,
 						       fs_block_size,
+						       align,
 						       info);
 		free(stage2_data);
 		if (stage2_count == 0) {
@@ -1297,7 +1298,7 @@ static int install_stages_dasd_fba(struct misc_fd *mfd, char *filename,
 		}
 		if (install_fba_stage1b(mfd, stage1b_list, stage1b_count,
 					stage2_list, stage2_count,
-					fs_block_size, info))
+					fs_block_size, align, info))
 			return -1;
 		free(stage2_list);
 		break;
@@ -1317,7 +1318,7 @@ static int install_stages_dasd_fba(struct misc_fd *mfd, char *filename,
 
 static int install_stages_eckd_dasd(struct misc_fd *mfd, char *filename,
 				    struct job_data *job,
-				    int fs_block_size,
+				    int fs_block_size, int align,
 				    struct disk_info *info,
 				    disk_blockptr_t *program_table,
 				    disk_blockptr_t **stage1b_list,
@@ -1341,6 +1342,7 @@ static int install_stages_eckd_dasd(struct misc_fd *mfd, char *filename,
 							stage2b_size,
 							&stage2b_list,
 							fs_block_size,
+							align,
 							info);
 		free(stage2b_data);
 		if (stage2b_count == 0) {
@@ -1349,7 +1351,7 @@ static int install_stages_eckd_dasd(struct misc_fd *mfd, char *filename,
 		}
 		if (install_eckd_stage1b(mfd, stage1b_list, stage1b_count,
 					 stage2b_list, stage2b_count,
-					 fs_block_size, info))
+					 fs_block_size, align, info))
 			return -1;
 		free(stage2b_list);
 		break;
@@ -1367,6 +1369,7 @@ static int install_stages_eckd_dasd(struct misc_fd *mfd, char *filename,
 							stage2b_size,
 							stage1b_list,
 							fs_block_size,
+							align,
 							info);
 		free(stage2b_data);
 		if (stage2b_count == 0) {
@@ -1395,6 +1398,7 @@ static int bootmap_install_stages(struct job_data *job, struct install_set *bis,
 	case disk_type_fba:
 		rc = install_stages_dasd_fba(&bis->mfd, bis->filename, job,
 					     bis->info->fs_block_size,
+					     bis->info->align,
 					     info,
 					     &pt->stage1b_list,
 					     &pt->stage1b_count,
@@ -1404,6 +1408,7 @@ static int bootmap_install_stages(struct job_data *job, struct install_set *bis,
 	case disk_type_eckd_cdl:
 		rc = install_stages_eckd_dasd(&bis->mfd, bis->filename, job,
 					      bis->info->fs_block_size,
+					      bis->info->align,
 					      info,
 					      &pt->table,
 					      &pt->stage1b_list,
