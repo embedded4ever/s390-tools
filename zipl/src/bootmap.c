@@ -413,8 +413,13 @@ static int add_component_file_range(struct install_set *bis,
 		*count -= DIV_ROUND_UP(trailer, info->phy_block_size);
 	}
 	/* Fill in component location */
-	location->addr = load_address;
-	location->size = *count * info->phy_block_size;
+	if (component_type_by_id(comp_id) == COMPONENT_TYPE_LOAD) {
+		location->addr = load_address;
+		location->size = *count * info->phy_block_size;
+	} else {
+		location->addr = 0;
+		location->size = 0;
+	}
 	/* Try to compact list */
 	*count = disk_compact_blocklist(*list, *count, info);
 write_segment_table:
