@@ -353,6 +353,7 @@ static int add_component_file_range(struct install_set *bis,
 {
 	struct program_component *pc = get_component(bis, mirror_id,
 						     comp_id, menu_idx);
+	struct component_footer *cf = component_footer_by_id(comp_id);
 	struct disk_info *info = &bis->info->base[mirror_id];
 	struct component_loc *location = &pc->loc;
 	disk_blockptr_t **list = &pc->list;
@@ -413,13 +414,7 @@ static int add_component_file_range(struct install_set *bis,
 		*count -= DIV_ROUND_UP(trailer, info->phy_block_size);
 	}
 	/* Fill in component location */
-	if (component_type_by_id(comp_id) == COMPONENT_TYPE_LOAD) {
-		location->addr = load_address;
-		location->size = *count * info->phy_block_size;
-	} else {
-		location->addr = 0;
-		location->size = 0;
-	}
+	cf->set_location(location, load_address, *count, info->phy_block_size);
 	/* Try to compact list */
 	*count = disk_compact_blocklist(*list, *count, info);
 write_segment_table:
@@ -472,6 +467,7 @@ static int add_component_buffer_base(struct install_set *bis, void *buffer,
 						     comp_id, menu_idx);
 	struct file_range *comp_reg = get_component_range(bis, comp_id,
 							  menu_idx);
+	struct component_footer *cf = component_footer_by_id(comp_id);
 	struct disk_info *info = &bis->info->base[mirror_id];
 	struct component_loc *location = &pc->loc;
 	disk_blockptr_t **list = &pc->list;
@@ -506,14 +502,9 @@ static int add_component_buffer_base(struct install_set *bis, void *buffer,
 		comp_reg->offset = offset;
 		comp_reg->len = size;
 	}
-	if (component_type_by_id(comp_id) == COMPONENT_TYPE_LOAD) {
-		/* Fill in component location */
-		location->addr = data.load_address;
-		location->size = *count * info->phy_block_size;
-	} else {
-		location->addr = 0;
-		location->size = 0;
-	}
+	/* Fill in component location */
+	cf->set_location(location, data.load_address, *count,
+			 info->phy_block_size);
 	/* Try to compact list */
 	*count = disk_compact_blocklist(*list, *count, info);
 write_segment_table:

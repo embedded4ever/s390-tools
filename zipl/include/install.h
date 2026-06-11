@@ -58,6 +58,9 @@ struct component_footer {
 			       * in the bootmap file. Otherwise, to
 			       * phy_block_size boundary.
 			       */
+	void (*set_location)(struct component_loc *location,
+			     address_t load_address, blocknum_t count,
+			     int block_size);
 };
 
 struct program_component {
@@ -107,6 +110,12 @@ static inline enum scsi_layout get_scsi_layout(unsigned char *bootblock)
 		 (bootblock[2] == 0xa9) && (bootblock[3] == 0x41))
 		return scsi_layout_sgi;
 	return scsi_layout_unknown;
+}
+
+static inline struct component_footer *
+component_footer_by_id(enum program_component_id id)
+{
+	return &component_footers[id];
 }
 
 static inline component_type component_type_by_id(enum program_component_id id)

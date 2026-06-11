@@ -257,57 +257,87 @@ main(int argc, char* argv[])
 	return abs(rc);
 }
 
+static void set_location_common(struct component_loc *location,
+				address_t load_address,
+				blocknum_t count,
+				int block_size)
+{
+	location->addr = load_address;
+	location->size = count * block_size;
+}
+
+static void set_location_noop(struct component_loc *location,
+			     __attribute__((unused)) address_t load_address,
+			     __attribute__((unused)) blocknum_t count,
+			     __attribute__((unused)) int block_size)
+{
+	location->addr = 0;
+	location->size = 0;
+}
+
 /**
  * Program Component Footers
  */
 struct component_footer component_footers[NR_PROGRAM_COMPONENTS] = {
 	[COMPONENT_ID_HEAP_AREA] = {
 		.type = COMPONENT_TYPE_LOAD,
-		.desc = "heap area"
+		.desc = "heap area",
+		.set_location = set_location_common
 	},
 	[COMPONENT_ID_STACK_AREA] = {
 		.type = COMPONENT_TYPE_LOAD,
-		.desc = "stack area"
+		.desc = "stack area",
+		.set_location = set_location_common
 	},
 	[COMPONENT_ID_LOADER_SIGNATURE] = {
 		.type = COMPONENT_TYPE_SIGNATURE,
-		.desc = "loader signature"
+		.desc = "loader signature",
+		.set_location = set_location_noop
 	},
 	[COMPONENT_ID_LOADER] = {
 		.type = COMPONENT_TYPE_LOAD,
-		.desc = "internal loader"
+		.desc = "internal loader",
+		.set_location = set_location_common
 	},
 	[COMPONENT_ID_PARAMETERS] = {
 		.type = COMPONENT_TYPE_LOAD,
-		.desc = "parameters"
+		.desc = "parameters",
+		.set_location = set_location_common
 	},
 	[COMPONENT_ID_IMAGE_SIGNATURE] = {
 		.type = COMPONENT_TYPE_SIGNATURE,
-		.desc = "image signature"
+		.desc = "image signature",
+		.set_location = set_location_noop,
 	},
 	[COMPONENT_ID_KERNEL_IMAGE] = {
 		.type = COMPONENT_TYPE_LOAD,
-		.desc = "kernel image"
+		.desc = "kernel image",
+		.set_location = set_location_common
 	},
 	[COMPONENT_ID_PARMLINE] = {
 		.type = COMPONENT_TYPE_LOAD,
-		.desc = "parmline"
+		.desc = "parmline",
+		.set_location = set_location_common
 	},
 	[COMPONENT_ID_RAMDISK_SIGNATURE] = {
 		.type = COMPONENT_TYPE_SIGNATURE,
-		.desc = "ramdisk signature"
+		.desc = "ramdisk signature",
+		.set_location = set_location_noop
 	},
 	[COMPONENT_ID_RAMDISK] = {
 		.type = COMPONENT_TYPE_LOAD,
-		.desc = "initial ramdisk"
+		.desc = "initial ramdisk",
+		.set_location = set_location_common
 	},
 	[COMPONENT_ID_ENVBLK] = {
 		.type = COMPONENT_TYPE_LOAD,
 		.desc = "environment blk",
-		.fs_block_aligned = 1
+		.fs_block_aligned = 1,
+		.set_location = set_location_common
 	},
 	[COMPONENT_ID_SEGMENT_FILE] = {
 		.type  = COMPONENT_TYPE_EXECUTE,
-		.desc = "segment file"
+		.desc = "segment file",
+		.set_location = set_location_noop
 	}
 };
