@@ -89,11 +89,26 @@ static const struct {
 	const char *name;
 	enum util_fmt_t fmt;
 } formats[] = {
-	{ "json", FMT_JSON },
-	{ "json-seq", FMT_JSONSEQ },
-	{ "jsonl", FMT_JSONL },
-	{ "pairs", FMT_PAIRS },
-	{ "csv",  FMT_CSV },
+	[FMT_JSON] = {
+		.name = "json",
+		.fmt = FMT_JSON
+	},
+	[FMT_JSONSEQ] = {
+		.name = "json-seq",
+		.fmt = FMT_JSONSEQ
+	},
+	[FMT_JSONL] = {
+		.name = "jsonl",
+		.fmt = FMT_JSONL
+	},
+	[FMT_PAIRS] = {
+		.name = "pairs",
+		.fmt = FMT_PAIRS
+	},
+	[FMT_CSV] = {
+		.name = "csv",
+		.fmt = FMT_CSV
+	},
 };
 
 /* Signal mask for blocking INT and TERM signals. */
@@ -110,6 +125,11 @@ bool util_fmt_name_to_type(const char *name, enum util_fmt_t *type)
 		}
 	}
 	return false;
+}
+
+const char *util_fmt_type_to_name(enum util_fmt_t type)
+{
+	return formats[type].name;
 }
 
 bool util_fmt_is_json(enum util_fmt_t type)

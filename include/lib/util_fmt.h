@@ -158,6 +158,16 @@ void util_fmt_exit(void);
 bool util_fmt_name_to_type(const char *name, enum util_fmt_t *type);
 
 /**
+ * util_fmt_type_to_name() - Get name of given format type identifier.
+ * @type: Format type identifier
+ *
+ * Get the name corresponding to the given format type identifier.
+ *
+ * Return: name of the format type
+ */
+const char *util_fmt_type_to_name(enum util_fmt_t type);
+
+/**
  * util_fmt_set_indent() - Set indentation parameters.
  * @base    : Base indentation level to apply to all output lines (default 0)
  * @width   : Number of indentation characters per intendation level (default 2)
