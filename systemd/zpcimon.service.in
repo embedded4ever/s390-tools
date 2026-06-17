@@ -13,7 +13,7 @@ Description=Monitor health of directly attached PCI NIC optical modules
 
 [Service]
 Type=exec
-ExecStart=@usrsbin_path@/zpcimon --send-report --monitor --interval 86400
+ExecStart=@usrsbin_path@/zpcimon --send-report --monitor --format jsonl --interval 86400
 KillMode=control-group
 
 [Install]

@@ -84,6 +84,14 @@ on".
 .PP
 .PP
 .
+.SS Output Format Options
+.OD format "" <FORMAT>
+Set the output format out of json, json-seq, jsonl, pairs, and csv. Note that
+only json-seq and jsonl sequence formats are supported for monitoring mode as
+they handle a continuous stream of updates well. While they are not supported
+in query mode.
+.PP
+.
 .SS General Options
 .OD help "h" ""
 Print usage information, then exit.

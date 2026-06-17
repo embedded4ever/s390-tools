@@ -7,9 +7,11 @@
 #ifndef OPTICSMON_CLI_H
 #define OPTICSMON_CLI_H
 
+#include "lib/util_fmt.h"
 #include "lib/util_opt.h"
 
 #define OPT_DUMP 128
+#define OPT_FORMAT 129
 
 static struct util_opt opt_vec[] = {
 	UTIL_OPT_SECTION("OPERATION OPTIONS"),
@@ -40,6 +42,13 @@ static struct util_opt opt_vec[] = {
 		.desc = "Interval in seconds at which to collect monitoring data "
 			"in the absence of link state changes. A value larger than "
 			"24 hours (86400 seconds) is clamped down to 24 hours.",
+	},
+	UTIL_OPT_SECTION("OUTPUT FORMAT OPTIONS"),
+	{
+		.option = { "format", required_argument, NULL, OPT_FORMAT },
+		.argument = "FORMAT",
+		.flags = UTIL_OPT_FLAG_NOSHORT,
+		.desc = "Output format (" FMT_TYPE_NAMES ")",
 	},
 	UTIL_OPT_SECTION("GENERAL OPTIONS"),
 	UTIL_OPT_HELP,

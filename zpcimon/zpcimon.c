@@ -40,6 +40,8 @@ struct options {
 	bool report;
 	bool module_info;
 	bool quiet;
+	enum util_fmt_t format;
+	bool explicit_format;
 
 	uint32_t interval_seconds;
 };
@@ -63,6 +65,7 @@ static const struct util_prg prg = {
 
 static void parse_cmdline(int argc, char *argv[], struct options *opts)
 {
+	enum util_fmt_t fmt;
 	uint32_t seconds;
 	int cmd, ret;
 
@@ -84,6 +87,12 @@ static void parse_cmdline(int argc, char *argv[], struct options *opts)
 			break;
 		case OPT_DUMP:
 			opts->module_info = true;
+			break;
+		case OPT_FORMAT:
+			if (!util_fmt_name_to_type(optarg, &fmt))
+				errx(EXIT_FAILURE, "Unknown format %s", optarg);
+			opts->format = fmt;
+			opts->explicit_format = true;
 			break;
 		case 'i':
 			ret = sscanf(optarg, "%u", &seconds);
@@ -224,7 +233,7 @@ static void dump_all_adapter_data(struct opticsmon_ctx *ctx)
 
 static int oneshot_mode(struct opticsmon_ctx *ctx)
 {
-	util_fmt_init(stdout, FMT_JSON, FMT_DEFAULT, API_LEVEL);
+	util_fmt_init(stdout, ctx->opts.format, FMT_DEFAULT, API_LEVEL);
 	if (!ctx->opts.quiet)
 		util_fmt_obj_start(FMT_LIST, "adapters");
 	dump_all_adapter_data(ctx);
@@ -375,7 +384,7 @@ static int monitor_mode(struct opticsmon_ctx *ctx)
 		goto close_timerfd;
 	}
 
-	util_fmt_init(stdout, FMT_JSONSEQ, FMT_DEFAULT, API_LEVEL);
+	util_fmt_init(stdout, ctx->opts.format, FMT_DEFAULT, API_LEVEL);
 	ret = link_mon_nl_waitfd_create(&ctx->lctx, on_link_change, ctx);
 	if (ret) {
 		fprintf(stderr, "Failed to create link monitoring socket\n");
@@ -393,12 +402,42 @@ close_timerfd:
 	return ret;
 }
 
+static bool is_supported_fmt(enum util_fmt_t fmt, bool monitor)
+{
+	switch (fmt) {
+	case FMT_JSON:
+	case FMT_PAIRS:
+		return monitor ? false : true;
+	case FMT_JSONL:
+	case FMT_JSONSEQ:
+		return monitor ? true : false;
+	default:
+		return false;
+	}
+}
+
+static int set_format(struct options *opts)
+{
+	if (!opts->explicit_format)
+		opts->format = (opts->monitor) ? FMT_JSONSEQ : FMT_JSON;
+
+	if (!is_supported_fmt(opts->format, opts->monitor)) {
+		warnx("Format %s is not supported in %s mode",
+		      util_fmt_type_to_name(opts->format), (opts->monitor) ? "monitor" : "query");
+		return -EINVAL;
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	struct opticsmon_ctx ctx = { .opts = { .interval_seconds = 86400 } };
 	int ret;
 
 	parse_cmdline(argc, argv, &ctx.opts);
+	ret = set_format(&ctx.opts);
+	if (ret)
+		return ret;
 	ret = ethtool_nl_connect(&ctx.ethtool_ctx);
 	if (ret)
 		return ret;
