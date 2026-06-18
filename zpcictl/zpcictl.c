@@ -18,8 +18,8 @@
 #include "lib/util_opt.h"
 #include "lib/util_path.h"
 #include "lib/util_prg.h"
-#include "lib/util_scandir.h"
 #include "lib/util_sys.h"
+#include "lib/pci_list.h"
 #include "lib/pci_sclp.h"
 
 #include "zpcictl.h"
@@ -187,35 +187,6 @@ static void sysfs_write_value(struct zpci_device *pdev, const char *attr,
 	free(path);
 }
 
-static void get_device_node(struct zpci_device *pdev)
-{
-	struct dirent **de_vec;
-	char *path, *dev;
-	char slot[13];
-	int count, i;
-
-	path = util_path_sysfs("bus/pci/devices/%s/nvme", pdev->slot);
-	count = util_scandir(&de_vec, alphasort, path, "nvme*");
-	if (count == -1) {
-		warnx("Could not read directory %s: %s", path, strerror(errno));
-		free(path);
-		return;
-	}
-
-	for (i = 0; i < count; i++) {
-		util_asprintf(&dev, "/dev/%s", de_vec[i]->d_name);
-		if (util_sys_get_dev_addr(dev, slot) != 0)
-			continue;
-		if (strcmp(slot, pdev->slot) == 0) {
-			pdev->device = dev;
-			break;
-		}
-	}
-
-	util_scandir_free(de_vec, count);
-	free(path);
-}
-
 static int device_exists(char *dev)
 {
 	char *path;
@@ -258,7 +229,7 @@ static void get_device_info(struct zpci_device *pdev, char *dev)
 	 * S.M.A.R.T. data at a later point.
 	 */
 	if (!pdev->device && pdev->class == PCI_CLASS_NVME)
-		get_device_node(pdev);
+		pdev->device = zpci_get_nvme_device_node(pdev->slot);
 }
 
 /*

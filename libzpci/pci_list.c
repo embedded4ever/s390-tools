@@ -20,6 +20,7 @@
 #include "lib/util_list.h"
 #include "lib/util_path.h"
 #include "lib/util_scandir.h"
+#include "lib/util_sys.h"
 
 /**
  * Get the function type name for the given device
@@ -137,7 +138,7 @@ const char *zpci_operstate_str(operstate_t state)
 static int zpci_populate_from_slot_dir(struct zpci_dev *zdev, const char *slot_dir,
 				       const char *slot_name)
 {
-	char buf_addr[11]; /* "dddd:bb:dd\0" */
+	char buf_addr[PCI_BDF_LEN];
 	uint8_t bus, df;
 	uint32_t domain;
 	int val, rc;
@@ -386,4 +387,47 @@ struct zpci_dev *zpci_find_by_netdev(struct util_list *zpci_list, char *netdev_n
 		}
 	}
 	return NULL;
+}
+
+/**
+ * Get the NVMe device file name given a PCI address
+ *
+ * This function retrieves the NVMe device file "/dev/nvmeX"
+ * for a given PCI address. The device name can be used to construct
+ * the path /dev/nvmeX which is the NVMe's controller's character
+ * device used for example to retrieve S.M.A.R.T. data.
+ *
+ * @param[in]	pci_addr	The "DDDD:bb:dd.f" format PCI address
+ *
+ * @return The NVMe device file name if one is found NULL otherwise
+ */
+char *zpci_get_nvme_device_node(const char *pci_addr)
+{
+	char *path, *dev = NULL;
+	char dev_addr[PCI_BDF_LEN];
+	struct dirent **de_vec;
+	int count, i;
+
+	path = util_path_sysfs("bus/pci/devices/%s/nvme", pci_addr);
+	count = util_scandir(&de_vec, alphasort, path, "nvme*");
+	if (count == -1) {
+		warnx("Could not read directory %s: %s", path, strerror(errno));
+		goto exit_path;
+	}
+
+	for (i = 0; i < count; i++) {
+		util_asprintf(&dev, "/dev/%s", de_vec[i]->d_name);
+		if (util_sys_get_dev_addr(dev, dev_addr) != 0)
+			goto free_continue;
+		if (strcmp(dev_addr, pci_addr) == 0)
+			break;
+free_continue:
+		free(dev);
+		dev = NULL;
+	}
+
+	util_scandir_free(de_vec, count);
+exit_path:
+	free(path);
+	return dev;
 }

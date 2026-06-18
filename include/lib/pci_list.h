@@ -17,6 +17,8 @@
 
 #include "util_list.h"
 
+#define PCI_BDF_LEN 13 /* DDDD:BB:dd.f\0 */
+
 enum zpci_pft {
 	ZPCI_PFT_UNCLASSIFIED = 0x00,
 
@@ -95,5 +97,7 @@ operstate_t zpci_operstate_from_str(const char *oper_str);
 
 struct zpci_dev *zpci_find_by_netdev(struct util_list *zpci_list, char *netdev_name,
 				     struct zpci_netdev **netdev);
+
+char *zpci_get_nvme_device_node(const char *pci_addr);
 
 #endif /* LIB_ZPCI_PCI_LIST_H */
