@@ -1,17 +1,135 @@
+use std::fmt::Display;
 // SPDX-License-Identifier: MIT
 //
 // Copyright IBM Corp. 2023, 2024
-
 use std::io::{Read, Write};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::str::FromStr;
 
-use clap::{ArgAction, ArgGroup, Args, Command, ValueHint};
+use clap::builder::{EnumValueParser, PossibleValue, TypedValueParser};
+use clap::{Arg, ArgAction, ArgGroup, Args, Command, ValueEnum, ValueHint};
 use log::{info, warn, LevelFilter};
 use pv::misc::{create_file, open_file, read_certs, read_file};
 use pv::request::openssl::pkey::{PKey, Public};
 use pv::request::HkdVerifier;
 use pv::{Error, Result};
+
+/// Generic version selection for CLI
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoOrExplicit<T> {
+    Auto,
+    Explicit(T),
+}
+
+impl<T> Display for AutoOrExplicit<T>
+where
+    T: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AutoOrExplicit::Auto => write!(f, "auto"),
+            AutoOrExplicit::Explicit(version) => write!(f, "{version}"),
+        }
+    }
+}
+
+impl<T> AutoOrExplicit<T> {
+    pub fn map<U, F>(self, f: F) -> AutoOrExplicit<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        match self {
+            AutoOrExplicit::Explicit(v) => AutoOrExplicit::Explicit(f(v)),
+            AutoOrExplicit::Auto => AutoOrExplicit::Auto,
+        }
+    }
+}
+
+impl<T> FromStr for AutoOrExplicit<T>
+where
+    T: FromStr<Err = String>,
+{
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "auto" => Ok(Self::Auto),
+            _ => {
+                let v = T::from_str(s)?;
+                Ok(Self::Explicit(v))
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct AutoOrExplicitParser<T> {
+    _marker: PhantomData<T>,
+}
+
+impl<T> Default for AutoOrExplicitParser<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> AutoOrExplicitParser<T> {
+    pub fn new() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> TypedValueParser for AutoOrExplicitParser<T>
+where
+    T: ValueEnum + FromStr + Clone + Send + Sync + Display + 'static,
+    T::Err: std::fmt::Display,
+{
+    type Value = AutoOrExplicit<T>;
+
+    fn parse_ref(
+        &self,
+        cmd: &Command,
+        arg: Option<&Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::error::Error> {
+        let s = value
+            .to_str()
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8).with_cmd(cmd))?;
+
+        if s == format!("{}", Self::Value::Auto) {
+            Ok(Self::Value::Auto)
+        } else {
+            let parsed = s.parse::<T>().map_err(|_e| {
+                let mut err =
+                    clap::error::Error::new(clap::error::ErrorKind::ValueValidation).with_cmd(cmd);
+                if let Some(arg) = arg {
+                    err.insert(
+                        clap::error::ContextKind::InvalidArg,
+                        clap::error::ContextValue::String(arg.to_string()),
+                    );
+                }
+                err.insert(
+                    clap::error::ContextKind::InvalidValue,
+                    clap::error::ContextValue::String(s.to_string()),
+                );
+                err
+            })?;
+
+            Ok(Self::Value::Explicit(parsed))
+        }
+    }
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let enum_parser = EnumValueParser::<T>::new();
+        let mut values = vec![PossibleValue::new("auto")];
+        values.extend(enum_parser.possible_values()?);
+
+        Some(Box::new(values.into_iter()))
+    }
+}
 
 /// CLI Argument collection for handling host-keys, IBM signing keys, and certificates.
 #[derive(Args, Debug, Clone, PartialEq, Eq, Default)]

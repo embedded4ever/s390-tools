@@ -18,8 +18,9 @@ pub use utils_macros::{ControlFlag, ValueEnumDisplay, ValueEnumFromStr};
 
 pub use crate::cli::{
     combined_path_opt, combined_path_req, get_reader_from_cli_file_arg,
-    get_writer_from_cli_file_arg, print_cli_error, print_error, CertificateOptions,
-    DeprecatedVerbosityOptions, VerbosityOptions, STDIN, STDOUT,
+    get_writer_from_cli_file_arg, print_cli_error, print_error, AutoOrExplicit,
+    AutoOrExplicitParser, CertificateOptions, DeprecatedVerbosityOptions, VerbosityOptions, STDIN,
+    STDOUT,
 };
 pub use crate::exit_code::{docstring, ExitCodeDoc, ExitCodeTrait, ExitCodeVariantDoc};
 pub use crate::file::{AtomicFile, AtomicFileOperation};
