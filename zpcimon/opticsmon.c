@@ -45,7 +45,6 @@ static int opticsmon_collect_adapter_data(struct zpcimon_ctx *ctx, struct zpci_d
 	struct options *opts = &ctx->opts;
 	struct optics **ois;
 	int num_ois = 0;
-	char *pci_addr;
 	int i, rc;
 
 	/* Filter non-NIC devices and VFs */
@@ -60,21 +59,12 @@ static int opticsmon_collect_adapter_data(struct zpcimon_ctx *ctx, struct zpci_d
 		num_ois++;
 	}
 	if (!opts->quiet) {
-		util_fmt_obj_start(FMT_DEFAULT, "adapter");
-		util_fmt_pair(FMT_QUOTE, "pft", zpci_pft_str(zdev));
-		util_fmt_obj_start(FMT_DEFAULT, "ids");
-		util_fmt_pair(FMT_QUOTE, "fid", "0x%0x", zdev->fid);
-		if (zdev->uid_is_unique)
-			util_fmt_pair(FMT_QUOTE, "uid", "0x%0x", zdev->uid);
-		pci_addr = zpci_pci_addr(zdev);
-		util_fmt_pair(FMT_QUOTE, "pci_address", pci_addr);
-		free(pci_addr);
-		util_fmt_obj_end();
+		zpci_adapter_json_print_start(zdev);
 		util_fmt_obj_start(FMT_LIST, "netdevs");
 		for (i = 0; i < zdev->num_netdevs; i++)
 			optics_json_print(opts, &zdev->netdevs[i], ois[i]);
 		util_fmt_obj_end(); /* netdevs list */
-		util_fmt_obj_end(); /* adapter */
+		zpci_adapter_json_print_end();
 		fflush(stdout);
 	}
 	if (opts->report) {

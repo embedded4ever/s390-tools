@@ -48,5 +48,7 @@ struct zpcimon_ops {
 
 void zpci_list_reload(struct util_list **zpci_list);
 
+void zpci_adapter_json_print_start(struct zpci_dev *zdev);
+void zpci_adapter_json_print_end(void);
 void zpcimon_json_base64_pair(char *name, uint8_t *buf, int len);
 #endif /* ZPCIMON_ZPCIMON_H */

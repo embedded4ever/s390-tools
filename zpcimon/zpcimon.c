@@ -112,6 +112,27 @@ static void parse_cmdline(int argc, char *argv[], struct options *opts)
 	} while (cmd != -1);
 }
 
+void zpci_adapter_json_print_start(struct zpci_dev *zdev)
+{
+	char *pci_addr;
+
+	util_fmt_obj_start(FMT_DEFAULT, "adapter");
+	util_fmt_pair(FMT_QUOTE, "pft", zpci_pft_str(zdev));
+	util_fmt_obj_start(FMT_DEFAULT, "ids");
+	util_fmt_pair(FMT_QUOTE, "fid", "0x%0x", zdev->fid);
+	if (zdev->uid_is_unique)
+		util_fmt_pair(FMT_QUOTE, "uid", "0x%0x", zdev->uid);
+	pci_addr = zpci_pci_addr(zdev);
+	util_fmt_pair(FMT_QUOTE, "pci_address", pci_addr);
+	free(pci_addr);
+	util_fmt_obj_end();
+}
+
+void zpci_adapter_json_print_end(void)
+{
+	util_fmt_obj_end(); /* adapter */
+}
+
 void zpcimon_json_base64_pair(char *name, uint8_t *buf, int len)
 {
 	int b64_calclen, b64len;
