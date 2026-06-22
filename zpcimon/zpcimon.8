@@ -33,7 +33,7 @@
 .TH zpcimon 8 "Oct 2024" s390-tools zpcictl
 .
 .SH NAME
-zpcimon - Monitor optical modules for directly attached PCI based NICs
+zpcimon - Monitor health of directly attached PCI devices including NVMes and NICs.
 .
 .
 .SH SYNOPSIS
@@ -45,26 +45,29 @@ zpcimon - Monitor optical modules for directly attached PCI based NICs
 Use
 .B zpcimon
 to monitor the health of the optical modules of directly attached PCI based
-NICs. When executed without the \fB--monitor\fR option it will collect optical
-module data from all available PCI network interface physical functions and
-print a summary in JSON format. Add the \fB--send-report\fR option to report
-this data to the support element.
-
+NICs as well as the health of NVMe devices using their SMART data. When
+executed without the \fB--monitor\fR option it will collect health data from
+all available and relevant PCI devices and print a summary in JSON format. Add
+the \fB--send-report\fR option to report this data to the support element.
 
 .
 .
 .SH OPTIONS
 .SS Operation Options
 .OD monitor "m"
-Run continuously and report on link state changes and periodically
+Run continuously and monitor all supported devices. On link state changes
+optical module data is collected and NVMe SMART data is collected on hotplug.
+Moreover every
+.B --interval
+seconds data from all adapters is collected as a whole system snapshot.
 .PP
 .
 .OD send-report "r"
-Report the optics health data to the Support Element (SE)
+Report the optics and NVMe health data to the Support Element (SE)
 .PP
 .
 .OD quiet "q"
-Be quiet and don't print optics health summary
+Be quiet and don't print health summaries.
 .PP
 .
 .OD interval "i" "seconds"
@@ -82,6 +85,11 @@ on".
 
 .CL zpcimon --module-info | jq -r '.adapters[0].netdevs[0].optics.module_info' | base64 -d | hexdump -C
 .PP
+.PP
+.
+.OD smart-log-raw ""
+Include a base64 encoded binary dump of each NVMe's SMART data. This matches
+"nvme smart-log --output-format=binary /dev/nvmeX".
 .PP
 .
 .SS Output Format Options

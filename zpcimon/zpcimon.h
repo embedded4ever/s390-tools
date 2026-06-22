@@ -11,6 +11,7 @@
 
 #include "lib/util_fmt.h"
 
+#include "nvmemon.h"
 #include "opticsmon.h"
 
 #define API_LEVEL 1
@@ -26,12 +27,15 @@ struct options {
 
 	/* Optics Monitoring Specific */
 	bool module_info;
+	/* NVMe Monitoring Specific */
+	bool smart_blob;
 };
 
 struct zpcimon_ctx {
 	struct options opts;
 	struct util_list *zpci_list;
 	struct opticsmon_ctx opticsmon_ctx;
+	struct nvmemon_ctx nvmemon_ctx;
 };
 
 struct zpcimon_ops {

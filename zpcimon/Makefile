@@ -29,6 +29,16 @@ check_dep_libnl3:
 BUILDTARGET += check_dep_libnl3
 endif # HAVE_LIBNL3
 
+ifneq (${HAVE_LIBNVME},0)
+check_dep_libnvme:
+	$(call check_dep, \
+		"zpcimon", \
+		"libnvme.h", \
+		"libnvme-devel", \
+		"HAVE_LIBNVME=0")
+BUILDTARGET += check_dep_libnvme
+endif # HAVE_LIBNVME
+
 ifeq (${HAVE_OPENSSL},0)
 
 all:
@@ -44,6 +54,13 @@ all:
 install:
 	$(SKIP) HAVE_LIBNL3=0
 
+else ifeq (${HAVE_LIBNVME},0)
+all:
+	$(SKIP) HAVE_LIBNVME=0
+
+install:
+	$(SKIP) HAVE_LIBNVME=0
+
 else
 
 ifneq ($(shell sh -c 'command -v pkg-config'),)
@@ -58,12 +75,15 @@ LIB_LFLAGS += $(shell $(PKG_CONFIG) --silence-errors --libs libnl-genl-3.0)
 LIB_LFLAGS += $(shell $(PKG_CONFIG) --silence-errors --libs libnl-route-3.0)
 
 LIB_LFLAGS += $(shell $(PKG_CONFIG) --silence-errors --libs libcrypto)
+LIB_LFLAGS += $(shell $(PKG_CONFIG) --silence-errors --libs libnvme)
 else
 LIB_CFLAGS += -I /usr/include/libnl3/
 LIB_LFLAGS += -lnl-route-3 -lnl-genl-3 -lnl-3
 
 LIB_CFLAGS += -I /usr/include/openssl/
 LIB_LFLAGS += -lcrypto
+
+LIB_LFLAGS += -lnvme
 endif
 
 ALL_CPPFLAGS += $(LIB_CFLAGS)
@@ -73,7 +93,7 @@ BUILDTARGET += zpcimon
 
 all: ${BUILDTARGET}
 
-zpcimon: zpcimon.o opticsmon.o optics_info.o optics_sclp.o ethtool.o link_mon.o $(libs)
+zpcimon: zpcimon.o nvmemon.o opticsmon.o optics_info.o optics_sclp.o ethtool.o link_mon.o $(libs)
 
 install: all
 	$(INSTALL) -d -m 755 $(DESTDIR)$(BINDIR) $(DESTDIR)$(MANDIR)/man8

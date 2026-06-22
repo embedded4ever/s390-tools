@@ -327,6 +327,7 @@ build options:
 | systemd      | `HAVE_SYSTEMD`     | hsavmcore                              |
 | libudev      | `HAVE_LIBUDEV`     | cpacfstatsd                            |
 | libnl3       | `HAVE_LIBNL3`      | zpcimon                                |
+| libnvme      | `HAVE_LIBNVME`     | zpcimon                                |
 
 This table lists additional build or install options:
 
@@ -375,10 +376,10 @@ the different tools are provided:
   The runtime requirements are: openssl-libs (>= 1.1.1) and libcurl.
 
 * zpcimon:
-  For building zpcimon OpenSSL and the Netlink Library Suite (libnl3) are
-  required.
+  For building zpcimon OpenSSL, the Netlink Library Suite (libnl3),
+  and libnvme are required.
   Tip: you may skip the zpcimon build by adding
-  `HAVE_OPENSSL=0` or `HAVE_LIBNL3=0`
+  `HAVE_OPENSSL=0` or `HAVE_LIBNL3=0` or `HAVE_LIBNVME=0`.
 
 * osasnmpd:
   You need at least the NET-SNMP 5.1.x package (net-snmp-devel.rpm)

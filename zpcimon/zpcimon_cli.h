@@ -12,6 +12,7 @@
 
 #define OPT_DUMP 128
 #define OPT_FORMAT 129
+#define OPT_SMART_DUMP 130
 
 static struct util_opt opt_vec[] = {
 	UTIL_OPT_SECTION("OPERATION OPTIONS"),
@@ -33,6 +34,13 @@ static struct util_opt opt_vec[] = {
 		.desc = "Include a base64 encoded binary dump of the module's "
 			"SFF-8636/8472/8024 standard data for each netdev. "
 			"This matches 'ethtool --module-info <netdev> raw on'",
+		.flags = UTIL_OPT_FLAG_NOSHORT,
+	},
+	{
+		.option = { "smart-log-raw", no_argument, NULL, OPT_SMART_DUMP },
+		.desc = "Include a base64 encoded binary dump of the "
+			"SMART log data for each NVMe. "
+			"This matches 'nvme smart-log --raw-binary <dev>'",
 		.flags = UTIL_OPT_FLAG_NOSHORT,
 	},
 	UTIL_OPT_SECTION("OPTIONS WITH ARGUMENTS"),

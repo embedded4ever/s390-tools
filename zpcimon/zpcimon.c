@@ -28,6 +28,7 @@
 #include "lib/util_time.h"
 #include "lib/zt_common.h"
 
+#include "nvmemon.h"
 #include "opticsmon.h"
 #include "zpcimon.h"
 #include "zpcimon_cli.h"
@@ -42,6 +43,7 @@ struct zpcimon_monitor {
 
 static struct zpcimon_monitor monitors[] = {
 	{.ops = &opticsmon_ops, .initialized = 0, .opened = 0},
+	{.ops = &nvmemon_ops, .initialized  = 0, .opened = 0},
 };
 
 static const struct util_prg prg = {
@@ -78,6 +80,9 @@ static void parse_cmdline(int argc, char *argv[], struct options *opts)
 			break;
 		case OPT_DUMP:
 			opts->module_info = true;
+			break;
+		case OPT_SMART_DUMP:
+			opts->smart_blob = true;
 			break;
 		case OPT_FORMAT:
 			if (!util_fmt_name_to_type(optarg, &fmt))
