@@ -17,7 +17,7 @@ use pv::request::SymKeyType;
 use pv::{Error as PvError, Result};
 use pvimg::misc::PSW;
 use pvimg::secured_comp::{ComponentTrait, Layout, SecuredComponentBuilder};
-use pvimg::uvdata::{BuilderTrait, SeHdrBuilder, SeHdrVersion};
+use pvimg::uvdata::{BuilderTrait, SeHdrBuilder, SeHdrControlFlags, SeHdrVersion, SeTarget};
 use utils::{AtomicFile, AtomicFileOperation, HexSlice, PvLogger, VerbosityOptions};
 
 /// Converts the hexstring into a byte vector.
@@ -203,11 +203,8 @@ fn main() -> anyhow::Result<()> {
     info!("\n# Creating Secure Execution Header");
     let addr = args.psw_addr;
     let mask = args.psw_mask;
-    let mut builder = SeHdrBuilder::new(
-        SeHdrVersion::V1,
-        PSW { addr, mask },
-        secure_comp_builer.finish()?,
-    )?;
+    let version = SeHdrVersion::V1;
+    let mut builder = SeHdrBuilder::new(version, PSW { addr, mask }, secure_comp_builer.finish()?)?;
     let mut target_pub_keys = vec![];
     for hkd_path in args.host_key_documents {
         info!(
@@ -231,8 +228,9 @@ fn main() -> anyhow::Result<()> {
     }
     builder.add_hostkeys(&target_pub_keys)?;
 
-    let pcf = try_parse_u64(&args.pcf, "pcf")?.into();
-    let scf = try_parse_u64(&args.scf, "scf")?.into();
+    let target = SeTarget::from_se_hdr_version(version);
+    let pcf = SeHdrControlFlags::from_u64(try_parse_u64(&args.pcf, "pcf")?, target, true);
+    let scf = SeHdrControlFlags::from_u64(try_parse_u64(&args.scf, "scf")?, target, false);
     info!(
         "PSW addr ............: {addr:#018x}\n\
          PSW mask ............: {mask:#018x}\n\

@@ -5,6 +5,7 @@
 mod brb;
 mod builder;
 mod flags;
+mod generic_flags;
 mod hdr_v1;
 mod keys;
 
@@ -14,7 +15,8 @@ pub use brb::{
 };
 pub use builder::SeHdrBuilder;
 pub use flags::{
-    ControlFlagTrait, ControlFlagsTrait, FlagData, PcfV1, PlaintextControlFlagsV1, ScfV1,
-    SecretControlFlagsV1,
+    ControlFlagTrait, EffectiveControlFlags, FlagData, FlagState, FlagsOverride, SeHdrControlFlags,
+    SeHdrControlFlagsModel, SeHdrFlag, SeTarget,
 };
+pub use generic_flags::IntoEnumIterator;
 pub use hdr_v1::SeHdrAadV1;

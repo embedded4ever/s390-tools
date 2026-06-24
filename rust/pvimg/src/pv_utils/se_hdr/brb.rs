@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use utils::S390ToolsMetaData;
 
 pub use super::hdr_v1::{SeHdrBinV1, SeHdrDataV1};
-use super::{PlaintextControlFlagsV1, SecretControlFlagsV1};
+use super::{EffectiveControlFlags, SeHdrFlag};
 use crate::misc::PAGESIZE;
 use crate::pv_utils::error::{Error, Result};
 use crate::pv_utils::misc::display_indented;
@@ -267,7 +267,7 @@ impl AeadCipherBuilderTrait for SeHdrData {
 pub trait SeHdrPubBuilderTrait {
     // Payload related methods
     fn set_components(&mut self, meta: ComponentMetadata) -> Result<()>;
-    fn set_pcf(&mut self, pcf: &PlaintextControlFlagsV1) -> Result<()>;
+    fn set_pcf(&mut self, pcf: &EffectiveControlFlags<SeHdrFlag>) -> Result<()>;
 }
 
 #[allow(dead_code)]
@@ -276,7 +276,7 @@ pub trait SeHdrConfBuilderTrait {
     fn generate_cck(&self) -> Result<SymKey>;
     fn set_cck(&mut self, cck: Confidential<Vec<u8>>) -> Result<()>;
     fn set_psw(&mut self, psw: &PSW);
-    fn set_scf(&mut self, scf: &SecretControlFlagsV1) -> Result<()>;
+    fn set_scf(&mut self, scf: &EffectiveControlFlags<SeHdrFlag>) -> Result<()>;
 }
 
 #[enum_dispatch(SeHdr)]

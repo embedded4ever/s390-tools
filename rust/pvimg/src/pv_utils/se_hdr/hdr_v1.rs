@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use utils::HexSlice;
 
 use super::keys::phkh_v1;
+use super::{EffectiveControlFlags, SeHdrControlFlags};
 use crate::error::Error;
 use crate::misc::PAGESIZE;
 use crate::pv_utils::error::Result;
@@ -37,9 +38,7 @@ use crate::pv_utils::uvdata::{
     UvDataTrait,
 };
 use crate::pv_utils::uvdata_builder::{AeadCipherBuilderTrait, KeyExchangeBuilderTrait};
-use crate::pv_utils::{
-    try_copy_slice_to_array, PlaintextControlFlagsV1, SecretControlFlagsV1, PSW,
-};
+use crate::pv_utils::{try_copy_slice_to_array, SeHdrFlag, SeTarget, PSW};
 
 #[derive(Debug)]
 struct HdrSizesV1 {
@@ -100,7 +99,7 @@ impl Display for SeHdrAadV1 {
         writeln!(
             f,
             "plaintext control flags:\n{}",
-            PlaintextControlFlagsV1::from(self.pcf)
+            SeHdrControlFlags::from_u64(self.pcf, SeTarget::V1Max, true)
         )?;
         Ok(())
     }
@@ -176,7 +175,7 @@ impl Display for SeHdrConfV1 {
         writeln!(
             f,
             "secret control flags:\n{}",
-            SecretControlFlagsV1::from(self.scf)
+            SeHdrControlFlags::from_u64(self.scf, SeTarget::V1Max, false)
         )?;
 
         // Support verbose mode if the `alternate` (`{:#}`) flag is used.
@@ -483,8 +482,8 @@ impl SeHdrConfBuilderTrait for SeHdrDataV1 {
         self.data.value_mut().psw = psw.clone();
     }
 
-    fn set_scf(&mut self, scf: &SecretControlFlagsV1) -> Result<()> {
-        self.data.value_mut().scf = scf.into();
+    fn set_scf(&mut self, scf: &EffectiveControlFlags<SeHdrFlag>) -> Result<()> {
+        self.data.value_mut().scf = scf.to_u64();
         Ok(())
     }
 
@@ -499,8 +498,8 @@ impl SeHdrConfBuilderTrait for SeHdrDataV1 {
 }
 
 impl SeHdrPubBuilderTrait for SeHdrDataV1 {
-    fn set_pcf(&mut self, pcf: &PlaintextControlFlagsV1) -> Result<()> {
-        self.aad.pcf = pcf.into();
+    fn set_pcf(&mut self, pcf: &EffectiveControlFlags<SeHdrFlag>) -> Result<()> {
+        self.aad.pcf = pcf.to_u64();
         Ok(())
     }
 

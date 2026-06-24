@@ -1,583 +1,744 @@
 // SPDX-License-Identifier: MIT
 //
-// Copyright IBM Corp. 2024
+// Copyright IBM Corp.
 
 //! Control flags for Secure Execution (SE) headers.
 //!
-//! This module provides types and traits for managing control flags used in
-//! IBM Secure Execution headers. It supports two types of flags:
-//! - Plaintext Control Flags (PCF)
-//! - Secret Control Flags (SCF)
+//! This module provides a flexible, type-safe API for managing control flags used in
+//! IBM Secure Execution (SE) headers. It supports both plaintext and secret control flags
+//! with version-specific configurations.
 //!
-//! # Examples
+//! # Architecture
 //!
+//! The module is built around several key components:
+//!
+//! ## Core Types
+//!
+//! - [`SeHdrFlag`] - Unified enum containing all control flags (plaintext and secret)
+//! - [`SeHdrControlFlagsModel`] - Version-specific configuration model that defines:
+//!   - Which flags are supported in a given SE header version
+//!   - Which flags are enabled by default
+//! - [`FlagsOverride`] - Container for user-specified flag overrides (enable/disable)
+//! - [`FlagState`] - Represents whether a flag is enabled or disabled
+//!
+//! ## Traits
+//!
+//! - [`ControlFlagTrait`] - Core trait for flag types, providing:
+//!   - `bit_position()` - Returns the bit position in the control flags bitfield
+//!   - `enabled()`/`disabled()` - Create flag data with specific states
+//!   - `AsRef<Self>` - Enables flexible API usage with both owned and borrowed values
+//!
+//! - [`IntoEnumIterator`] - Enables iteration over all flag variants
+//!
+//! # Usage Patterns
+//!
+//! ## 1. Getting Version-Specific Configuration
+//!
+//! ```rust
+//! use pvimg::uvdata::{SeHdrControlFlagsModel, SeTarget};
+//!
+//! // Get plaintext control flags configuration for V1-max
+//! let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
 //! ```
-//! use pvimg::uvdata::{ControlFlagTrait, ControlFlagsTrait, PcfV1, PlaintextControlFlagsV1};
 //!
-//! // Create flags with specific settings
-//! let flags = PlaintextControlFlagsV1::from_flags([
-//!     PcfV1::AllowDumping.enabled(),
-//!     PcfV1::PckmoAes.enabled(),
-//! ]);
+//! ## 2. Checking Flag Support and Defaults
 //!
-//! // Check if a flag is set
-//! assert!(flags.is_set(PcfV1::AllowDumping));
+//! ```rust
+//! use pvimg::uvdata::{SeHdrControlFlagsModel, SeHdrFlag, SeTarget};
+//!
+//! let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+//!
+//! // Check if a flag is supported in this target
+//! assert!(pcf_v1.supports(SeHdrFlag::ConfidentialDump));
+//!
+//! // Check if a flag is enabled by default
+//! assert!(pcf_v1.is_default(SeHdrFlag::PckmoAes));
+//! assert!(!pcf_v1.is_default(SeHdrFlag::ConfidentialDump));
+//! ```
+//!
+//! ## 3. Applying Overrides
+//!
+//! ```rust
+//! use pvimg::uvdata::{FlagsOverride, SeHdrControlFlagsModel, SeHdrFlag, SeTarget};
+//!
+//! let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+//!
+//! // Create overrides to customize flags
+//! let mut overrides = FlagsOverride::new();
+//! overrides.enable(SeHdrFlag::ConfidentialDump);
+//! overrides.disable(SeHdrFlag::PckmoAes);
+//!
+//! // Validate and apply overrides
+//! let result = pcf_v1.with_overrides(&overrides);
+//! assert!(result.is_ok());
+//! ```
+//!
+//! # Error Handling
+//!
+//! The API uses [`FlagValidationError`] to report issues:
+//!
+//! - `NotSupported` - Attempted to override a flag not supported in the target version
+//!
 //! ```
 
-use std::fmt::{Display, LowerHex};
-use std::marker::PhantomData;
-use std::mem::size_of;
+use std::collections::HashSet;
 
 use pv::misc::{Flags, Msb0Flags64};
+use utils::ControlFlag;
 
-pub trait IntoEnumIterator: Sized {
-    /// Returns an iterator over all variants of this enum.
-    fn iter() -> impl Iterator<Item = Self>;
-}
+// Re-export IntoEnumIterator for external use
+pub use super::generic_flags::IntoEnumIterator;
+// Re-export generic types and traits from generic_flags module
+pub use super::generic_flags::{
+    ControlFlagTrait, ControlFlagsModel, EffectiveControlFlags, FlagData, FlagState, FlagsOverride,
+    SeTarget, UnknownFlags,
+};
 
-/// Trait for individual control flag types.
-///
-/// This trait defines the interface for control flag enums, providing methods
-/// to get the flag's bit position and create enabled/disabled flag data.
-/// Implementors must be enum types with `#[repr(u8)]` to ensure proper bit positioning.
-pub trait ControlFlagTrait:
-    std::fmt::Debug + std::hash::Hash + Copy + Eq + Ord + Display + IntoEnumIterator
-{
-    /// Returns the bit position (0-63) for this flag in MSB0 ordering.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes the implementing type is `#[repr(u8)]` and performs
-    /// an unsafe cast to extract the discriminant value.
-    fn discriminant(&self) -> u8 {
-        assert!(size_of::<Self>() == size_of::<u8>());
-        unsafe { *(self as *const Self as *const u8) }
-    }
+pub type SeHdrControlFlags = EffectiveControlFlags<SeHdrFlag>;
 
-    /// Creates flag data with this flag in the enabled state.
-    fn enabled(self) -> FlagData<Self> {
-        FlagData::new(self, FlagState::Enabled)
-    }
-
-    /// Creates flag data with this flag in the disabled state.
-    fn disabled(self) -> FlagData<Self> {
-        FlagData::new(self, FlagState::Disabled)
-    }
-
-    /// Creates a vector of flag data with all specified flags enabled.
+impl SeHdrControlFlags {
+    /// Creates an `EffectiveControlFlags<SeHdrFlag>` from a u64 value for the specified target.
     ///
     /// # Arguments
     ///
-    /// * `flags` - A collection of flags to enable
-    fn all_enabled<F: AsRef<[Self]>>(flags: F) -> Vec<FlagData<Self>> {
-        flags
-            .as_ref()
-            .iter()
-            .map(|flag| (*flag).enabled())
-            .collect()
-    }
-
-    /// Creates a vector of flag data with all specified flags disabled.
-    ///
-    /// # Arguments
-    ///
-    /// * `flags` - A collection of flags to disable
-    fn all_disabled<F: AsRef<[Self]>>(flags: F) -> Vec<FlagData<Self>> {
-        flags
-            .as_ref()
-            .iter()
-            .map(|flag| (*flag).disabled())
-            .collect()
-    }
-}
-
-/// Internal state of a control flag (enabled or disabled).
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-enum FlagState {
-    /// Flag is enabled (bit set to 1)
-    Enabled,
-    /// Flag is disabled (bit set to 0)
-    Disabled,
-}
-
-/// Represents a control flag with its associated state.
-///
-/// This structure pairs a flag with its enabled/disabled state, used when
-/// constructing or modifying `ControlFlags` instances.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub struct FlagData<T: ControlFlagTrait> {
-    value: T,
-    state: FlagState,
-}
-
-impl<T: ControlFlagTrait> FlagData<T> {
-    const fn new(value: T, state: FlagState) -> Self {
-        Self { value, state }
-    }
-}
-
-/// Trait for managing control flags in Secure Execution headers.
-///
-/// This trait provides methods for parsing, checking, and validating
-/// control flags used in Secure Execution headers.
-pub trait ControlFlagsTrait {
-    /// The underlying control flag type
-    type T: ControlFlagTrait;
-
-    /// Creates a new instance from a collection of flag data
-    fn from_flags<F: AsRef<[FlagData<Self::T>]>>(flags: F) -> Self;
-
-    /// Parses and applies flag data to this instance
-    fn parse_flags<F: AsRef<[FlagData<Self::T>]>>(&mut self, flags: F);
-
-    /// Checks if a specific flag is set
-    fn is_set(&self, flag: Self::T) -> bool;
-
-    /// Checks if a specific flag is not set
-    fn is_unset(&self, flag: Self::T) -> bool {
-        !self.is_set(flag)
-    }
-
-    /// Validates that there are no duplicate flags in the collection
-    fn no_duplicates<F: AsRef<[FlagData<Self::T>]>>(flags: F) -> bool {
-        let mut flags_sorted = flags.as_ref().to_vec();
-        flags_sorted.sort_by_key(|data| data.value);
-        flags_sorted.dedup_by_key(|data| data.value);
-
-        flags_sorted.len() == flags.as_ref().len()
-    }
-
-    /// Checks if all specified flags are set.
-    ///
-    /// # Arguments
-    ///
-    /// * `flags` - A collection of flags to check
+    /// * `value` - The u64 bitfield value
+    /// * `target` - The target SE header flags configuration
+    /// * `is_pcf` - Whether this is for plaintext control flags (true) or secret control flags
+    ///   (false)
     ///
     /// # Returns
     ///
-    /// `true` if all flags are set, `false` otherwise
-    fn all_set<F: AsRef<[Self::T]>>(&self, flags: F) -> bool {
-        flags.as_ref().iter().all(|flag| self.is_set(*flag))
-    }
-
-    /// Checks if all specified flags are unset.
-    ///
-    /// # Arguments
-    ///
-    /// * `flags` - A collection of flags to check
-    ///
-    /// # Returns
-    ///
-    /// `true` if all flags are unset, `false` otherwise
-    fn all_unset<F: AsRef<[Self::T]>>(&self, flags: F) -> bool {
-        flags.as_ref().iter().all(|flag| self.is_unset(*flag))
-    }
-}
-
-/// Bitflags container for Secure Execution control flags.
-///
-/// This structure wraps a 64-bit value with MSB0 (Most Significant Bit first)
-/// ordering, as used by IBM Secure Execution. Each bit position corresponds to
-/// a specific control flag defined by the generic type parameter `T`.
-///
-/// # Type Parameters
-///
-/// * `T` - The control flag enum type (e.g., [`PcfV1`] or [`ScfV1`])
-///
-/// # Examples
-///
-/// ```rust
-/// use pvimg::uvdata::{ControlFlagsTrait, PcfV1, PlaintextControlFlagsV1};
-///
-/// // Create from u64 (bit 57 MSB0 = 0x40)
-/// let flags: PlaintextControlFlagsV1 = 0x0000000000000040_u64.into();
-///
-/// // Check if a flag is set
-/// assert!(flags.is_set(PcfV1::PckmoAes));
-///
-/// // Convert back to u64
-/// let value: u64 = flags.into();
-/// assert_eq!(value, 0x0000000000000040_u64);
-/// ```
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ControlFlags<T: ControlFlagTrait> {
-    flags: Msb0Flags64,
-    t: PhantomData<T>,
-}
-
-impl<T: ControlFlagTrait> ControlFlags<T> {
-    /// Creates a new instance with all flags disabled.
-    fn new() -> Self {
-        Self {
-            flags: 0x0.into(),
-            t: PhantomData {},
-        }
-    }
-
-    /// Returns a vector of all currently enabled flags.
-    ///
-    /// # Returns
-    ///
-    /// A vector containing all flags that are currently set (enabled)
-    pub fn flags(&self) -> Vec<T> {
-        T::iter()
-            .filter(|flag| self.flags.is_set(flag.discriminant()))
-            .collect()
-    }
-}
-
-impl<T: ControlFlagTrait> From<u64> for ControlFlags<T> {
-    fn from(value: u64) -> Self {
-        Self {
-            flags: value.into(),
-            t: PhantomData,
-        }
-    }
-}
-
-impl<T: ControlFlagTrait> From<&ControlFlags<T>> for u64 {
-    fn from(value: &ControlFlags<T>) -> Self {
-        value.flags.into()
-    }
-}
-
-impl<T: ControlFlagTrait> From<ControlFlags<T>> for u64 {
-    fn from(value: ControlFlags<T>) -> Self {
-        value.flags.into()
-    }
-}
-
-impl<T: ControlFlagTrait> ControlFlagsTrait for ControlFlags<T> {
-    type T = T;
-
-    fn from_flags<F: AsRef<[FlagData<T>]>>(flags: F) -> Self {
-        let mut ret = Self::new();
-        ret.parse_flags(flags);
-        ret
-    }
-
-    fn parse_flags<F: AsRef<[FlagData<T>]>>(&mut self, flags: F) {
-        flags.as_ref().iter().for_each(|v| match v.state {
-            FlagState::Enabled => self.flags.set_bit(v.value.discriminant()),
-            FlagState::Disabled => self.flags.unset_bit(v.value.discriminant()),
-        });
-    }
-
-    fn is_set(&self, flag: T) -> bool {
-        self.flags.is_set(flag.discriminant())
-    }
-}
-
-impl<T: ControlFlagTrait> LowerHex for ControlFlags<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value: u64 = self.flags.into();
-        write!(f, "{value:#018x}")
-    }
-}
-
-/// Plaintext Control Flags for Secure Execution header version 1.
-///
-/// These flags control various aspects of Protected Virtualization (PV) guest
-/// behavior and capabilities. Each variant represents a specific bit position
-/// in the 64-bit control flags field (MSB0 ordering).
-///
-/// # Bit Positions
-///
-/// The numeric values represent bit positions in MSB0 ordering (bit 0 is the
-/// most significant bit). For example, `AllowDumping = 34` means bit 34 from
-/// the left (MSB).
-#[repr(u8)]
-#[non_exhaustive]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PcfV1 {
-    /// Enables Protected Virtualization guest dump support.
-    ///
-    /// When set, allows dumping of the PV guest for debugging purposes.
-    AllowDumping = 34,
-
-    /// Disables component encryption during image unpacking.
-    ///
-    /// When set, components are not decrypted during the SE image unpack process.
-    NoComponentEncryption = 35,
-
-    /// Enables DEA/TDEA PCKMO encryption functions.
-    ///
-    /// Allows the guest to use Data Encryption Algorithm (DEA) and Triple DEA
-    /// with the Perform Cryptographic Key Management Operation (PCKMO) instruction.
-    PckmoDeaTdea = 56,
-
-    /// Enables AES PCKMO encryption functions.
-    ///
-    /// Allows the guest to use Advanced Encryption Standard (AES) with PCKMO.
-    PckmoAes = 57,
-
-    /// Enables ECC PCKMO encryption functions.
-    ///
-    /// Allows the guest to use Elliptic Curve Cryptography (ECC) with PCKMO.
-    PckmoEcc = 58,
-
-    /// Enables HMAC PCKMO encryption functions.
-    ///
-    /// Allows the guest to use Hash-based Message Authentication Code (HMAC) with PCKMO.
-    PckmoHmac = 59,
-
-    /// Enables backup target keys support.
-    ///
-    /// When set, allows the use of backup target keys for key management operations.
-    BackupTargetKeys = 62,
-}
-
-impl IntoEnumIterator for PcfV1 {
-    fn iter() -> impl Iterator<Item = Self> {
-        [
-            Self::AllowDumping,
-            Self::NoComponentEncryption,
-            Self::PckmoDeaTdea,
-            Self::PckmoAes,
-            Self::PckmoEcc,
-            Self::PckmoHmac,
-            Self::BackupTargetKeys,
-        ]
-        .into_iter()
-    }
-}
-
-impl ControlFlagTrait for PcfV1 {}
-
-impl<T: ControlFlagTrait> Display for ControlFlags<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if f.alternate() {
-            write!(f, "{:#066b}", <u64>::from(self.flags))
+    /// An `EffectiveControlFlags<SeHdrFlag>` with flags extracted from the u64 value
+    pub fn from_u64(value: u64, target: SeTarget, is_pcf: bool) -> Self {
+        let flags = Msb0Flags64::from(value);
+        let target_model = if is_pcf {
+            SeHdrControlFlagsModel::pcf_for_target(target)
         } else {
-            let known_flags = self.flags();
-            let mut flags_s = known_flags
-                .iter()
-                .map(|flag| format!(" - {flag}"))
-                .collect::<Vec<_>>();
-            let known_flags_u64: u64 = Self::from_flags(T::all_enabled(known_flags)).into();
-            let unknown_flags = <u64>::from(self.flags) - known_flags_u64;
-            if unknown_flags != 0x0 {
-                flags_s.push(format!(
-                    " - unknown flags {:#}",
-                    <Self>::from(unknown_flags)
-                ));
-            }
+            SeHdrControlFlagsModel::scf_for_target(target)
+        };
 
-            write!(f, "{}", flags_s.join("\n"))
+        // Parse the flags and extract known flags
+        let mut known_flags = HashSet::new();
+        let mut unhandled_bits = flags;
+
+        for flag in SeHdrFlag::iter() {
+            if flags.is_set(flag.bit_position()) && target_model.supports(flag) {
+                known_flags.insert(flag);
+                // Clear this bit from unhandled
+                unhandled_bits.unset_bit(flag.bit_position());
+            }
         }
-    }
-}
 
-/// Type alias for plaintext control flags version 1.
-///
-/// This is the primary type used for managing plaintext control flags in
-/// SE header version 1.
-pub type PlaintextControlFlagsV1 = ControlFlags<PcfV1>;
-impl PlaintextControlFlagsV1 {
-    /// Array of all PCKMO-related flags (excluding HMAC).
-    ///
-    /// This constant provides convenient access to the three main PCKMO flags
-    /// that are typically enabled together.
-    pub const PCKMO: [PcfV1; 3] = [PcfV1::PckmoAes, PcfV1::PckmoDeaTdea, PcfV1::PckmoEcc];
-}
-
-impl Default for PlaintextControlFlagsV1 {
-    /// Creates default plaintext control flags with PCKMO support enabled.
-    fn default() -> Self {
-        Self::from_flags(PcfV1::all_enabled(PlaintextControlFlagsV1::PCKMO))
-    }
-}
-
-impl Display for PcfV1 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::AllowDumping => "allow dumping",
-                Self::NoComponentEncryption => "no component encryption",
-                Self::PckmoDeaTdea => "DEA and TDEA PCKMO support",
-                Self::PckmoAes => "AES PCKMO support",
-                Self::PckmoEcc => "ECC PCKMO support",
-                Self::PckmoHmac => "HMAC PCKMO support",
-                Self::BackupTargetKeys => "backup target keys support",
-            }
+        EffectiveControlFlags::new(
+            target.to_se_hdr_version(),
+            known_flags,
+            UnknownFlags::from_bits(unhandled_bits),
         )
     }
 }
 
-/// Secret Control Flags for Secure Execution header version 1.
+/// Type alias for plaintext control flags configuration.
+pub type SeHdrControlFlagsModel = ControlFlagsModel<SeHdrFlag>;
+
+impl SeHdrControlFlagsModel {
+    /// Array of all PCKMO-related flags (excluding HMAC).
+    pub const PCKMO: [SeHdrFlag; 3] = [
+        SeHdrFlag::PckmoDeaTdea,
+        SeHdrFlag::PckmoAes,
+        SeHdrFlag::PckmoEcc,
+    ];
+
+    /// Creates a new PlaintextControlFlags for the specified SE header flags target with predefined
+    /// defaults.
+    pub fn pcf_for_target(target: SeTarget) -> Self {
+        use SeHdrFlag::*;
+
+        // Common flags for both V1 and V2
+        let common_supported = [
+            ConfidentialDump,
+            NoComponentEncryption,
+            PckmoDeaTdea,
+            PckmoAes,
+            PckmoEcc,
+            PckmoHmac,
+            BackupTargetKeys,
+        ];
+        let common_defaults = [PckmoDeaTdea, PckmoAes, PckmoEcc];
+
+        let (default, supported) = match target {
+            SeTarget::V1Max => (
+                common_defaults.into_iter().collect(),
+                common_supported.into_iter().collect(),
+            ),
+        };
+
+        Self::new(target, default, supported)
+    }
+
+    /// Creates a new SecretControlFlags for the specified SE header flags target with predefined
+    /// defaults.
+    pub fn scf_for_target(target: SeTarget) -> Self {
+        use SeHdrFlag::*;
+
+        let supported = [CckExtensionSecretEnforcement, CckUpdate]
+            .into_iter()
+            .collect();
+        let default = HashSet::new();
+
+        Self::new(target, default, supported)
+    }
+}
+
+/// Control Flags - All possible flags across all versions.
 ///
-/// These flags control various aspects of Protected Virtualization (PV) guest
-/// behavior and capabilities. Each variant represents a specific bit position
-/// in the 64-bit control flags field (MSB0 ordering).
-///
-/// # Bit Positions
-///
-/// The numeric values represent bit positions in MSB0 ordering (bit 0 is the
-/// most significant bit). For example, `CckExtensionSecretEnforcement = 1` means bit 1 from
-/// the left (MSB).
-#[repr(u8)]
+/// This enum contains all control flags (both plaintext and secret) that can be used across
+/// different SE header versions.
+#[derive(ControlFlag, Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ScfV1 {
+pub enum SeHdrFlag {
+    #[flag(display = "CCK extension secret enforced", value = 1)]
     /// Enforces extension secret requirement for add-secret requests.
     ///
     /// When set, all add-secret requests must provide an extension secret.
     /// This adds an additional layer of security to secret management.
-    CckExtensionSecretEnforcement = 1,
+    CckExtensionSecretEnforcement,
 
+    #[flag(display = "CCK update allowed", value = 2)]
     /// Allows Customer Communication Key (CCK) updates.
     ///
     /// When set, permits updating the CCK after initial configuration.
-    CckUpdateAllowed = 2,
+    CckUpdate,
+
+    #[flag(display = "confidential guest dump support", value = 34)]
+    /// Enables Confidential guest dump support.
+    ///
+    /// When set, allows dumping of the Secure Execution guest for debugging purposes.
+    ConfidentialDump,
+
+    #[flag(display = "no component encryption", value = 35)]
+    /// Disables component encryption during image unpacking.
+    ///
+    /// When set, components are not decrypted during the SE image unpack process.
+    NoComponentEncryption,
+
+    #[flag(display = "DEA and TDEA PCKMO support", value = 56)]
+    /// Enables DEA/TDEA PCKMO encryption functions.
+    ///
+    /// Allows the guest to use Data Encryption Algorithm (DEA) and Triple DEA
+    /// with the Perform Cryptographic Key Management Operation (PCKMO) instruction.
+    PckmoDeaTdea,
+
+    #[flag(display = "AES PCKMO support", value = 57)]
+    /// Enables AES PCKMO encryption functions.
+    ///
+    /// Allows the guest to use Advanced Encryption Standard (AES) with PCKMO.
+    PckmoAes,
+
+    #[flag(display = "ECC PCKMO support", value = 58)]
+    /// Enables ECC PCKMO encryption functions.
+    ///
+    /// Allows the guest to use Elliptic Curve Cryptography (ECC) with PCKMO.
+    PckmoEcc,
+
+    #[flag(display = "HMAC PCKMO support", value = 59)]
+    /// Enables HMAC PCKMO encryption functions.
+    ///
+    /// Allows the guest to use Hash-based Message Authentication Code (HMAC) with PCKMO.
+    PckmoHmac,
+
+    #[flag(display = "backup target keys support", value = 62)]
+    /// Enables backup target keys support.
+    ///
+    /// When set, allows the use of backup target keys for key management operations.
+    BackupTargetKeys,
 }
 
-impl IntoEnumIterator for ScfV1 {
-    fn iter() -> impl Iterator<Item = Self> {
-        [Self::CckExtensionSecretEnforcement, Self::CckUpdateAllowed].into_iter()
+// Implement AsRef<Self> for SeHdrFlag to enable flexible API usage
+impl AsRef<SeHdrFlag> for SeHdrFlag {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
-impl ControlFlagTrait for ScfV1 {}
+impl std::str::FromStr for SeHdrFlag {
+    type Err = String;
 
-impl Display for ScfV1 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::CckExtensionSecretEnforcement => "CCK extension secret enforced",
-                Self::CckUpdateAllowed => "CCK update allowed",
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let normalized = s.to_lowercase().replace('_', "-");
+
+        // Try to find a flag whose display name matches the input
+        for flag in Self::iter() {
+            let display_name = format!("{}", flag).to_lowercase().replace(' ', "-");
+
+            // Check for exact match with display name
+            if normalized == display_name {
+                return Ok(flag);
             }
-        )
-    }
-}
 
-/// Type alias for secret control flags version 1.
-///
-/// This is the primary type used for managing secret control flags in
-/// SE header version 1.
-pub type SecretControlFlagsV1 = ControlFlags<ScfV1>;
+            // Check for common abbreviations
+            let matches = match flag {
+                Self::PckmoDeaTdea => normalized == "pckmo-dea-tdea" || normalized == "pckmo-dea",
+                Self::BackupTargetKeys => {
+                    normalized == "backup-keys" || normalized == "backup-target-keys"
+                }
+                Self::CckExtensionSecretEnforcement => {
+                    normalized == "cck-extension-secret"
+                        || normalized == "cck-extension-secret-enforcement"
+                }
+                Self::CckUpdate => normalized == "cck-update" || normalized == "cck-update-allowed",
+                _ => false,
+            };
 
-impl Default for SecretControlFlagsV1 {
-    /// Creates default secret control flags.
-    fn default() -> Self {
-        Self::from_flags(ScfV1::all_enabled([]))
+            if matches {
+                return Ok(flag);
+            }
+        }
+
+        Err(format!("Unknown flag name: '{}'", s))
     }
 }
 
 #[allow(clippy::shadow_unrelated)]
 #[cfg(test)]
 mod test {
-    use super::{
-        ControlFlagTrait, ControlFlagsTrait, PcfV1, PlaintextControlFlagsV1, ScfV1,
-        SecretControlFlagsV1,
-    };
+    use pv::misc::Flags;
+
+    use super::super::brb::SeHdrVersion;
+    use super::*;
 
     #[test]
-    fn test_from_flags() {
-        let flags = PlaintextControlFlagsV1::from_flags(&[]);
-        assert_eq!(u64::from(flags), 0_u64);
+    fn test_pcfs_v1() {
+        let pcfs_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
 
-        let flags = PlaintextControlFlagsV1::from_flags([PcfV1::AllowDumping.enabled()]);
-        assert_eq!(u64::from(&flags), 536870912);
-        assert!(flags.is_set(PcfV1::AllowDumping));
+        // V1 flags
+        assert!(pcfs_v1.supports(SeHdrFlag::ConfidentialDump));
+        assert!(pcfs_v1.supports(SeHdrFlag::NoComponentEncryption));
+        assert!(pcfs_v1.supports(SeHdrFlag::PckmoDeaTdea));
+        assert!(pcfs_v1.supports(SeHdrFlag::PckmoAes));
+        assert!(pcfs_v1.supports(SeHdrFlag::PckmoEcc));
+        assert!(pcfs_v1.supports(SeHdrFlag::PckmoHmac));
+        assert!(pcfs_v1.supports(SeHdrFlag::BackupTargetKeys));
 
-        let flags = PlaintextControlFlagsV1::from_flags([
-            PcfV1::AllowDumping.enabled(),
-            PcfV1::AllowDumping.disabled(),
-        ]);
-        assert_eq!(u64::from(flags), 0);
-
-        let flags = PlaintextControlFlagsV1::from_flags([
-            PcfV1::AllowDumping.disabled(),
-            PcfV1::AllowDumping.enabled(),
-        ]);
-        assert_eq!(u64::from(&flags), 536870912);
-
-        let flags = PlaintextControlFlagsV1::from_flags([
-            PcfV1::AllowDumping.enabled(),
-            PcfV1::BackupTargetKeys.enabled(),
-        ]);
-        assert_eq!(u64::from(&flags), 536870914);
+        // Check defaults (PCKMO flags)
+        assert!(pcfs_v1.is_default(SeHdrFlag::PckmoDeaTdea));
+        assert!(pcfs_v1.is_default(SeHdrFlag::PckmoAes));
+        assert!(pcfs_v1.is_default(SeHdrFlag::PckmoEcc));
+        assert!(!pcfs_v1.is_default(SeHdrFlag::ConfidentialDump));
     }
 
     #[test]
-    fn test_all_set_unset() {
-        let flags = PlaintextControlFlagsV1::from_flags([
-            PcfV1::AllowDumping.enabled(),
-            PcfV1::BackupTargetKeys.enabled(),
-        ]);
-        assert!(flags.all_set([PcfV1::AllowDumping, PcfV1::BackupTargetKeys]));
-        assert!(!flags.all_set([PcfV1::NoComponentEncryption, PcfV1::BackupTargetKeys]));
-        assert!(!flags.all_unset([PcfV1::NoComponentEncryption, PcfV1::BackupTargetKeys]));
-        assert!(flags.all_unset([PcfV1::NoComponentEncryption, PcfV1::PckmoHmac]));
+    fn test_scfs_v1() {
+        let scfs_v1 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V1Max);
+
+        assert!(scfs_v1.supports(SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(scfs_v1.supports(SeHdrFlag::CckUpdate));
+
+        // No defaults for secret flags
+        assert!(!scfs_v1.is_default(SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(!scfs_v1.is_default(SeHdrFlag::CckUpdate));
     }
 
     #[test]
-    fn test_display() {
-        let flags = PlaintextControlFlagsV1::from_flags([PcfV1::NoComponentEncryption.enabled()]);
-        assert_eq!("0x0000000010000000", format!("{flags:#x}"));
-        assert_eq!(format!("{flags}"), " - no component encryption");
+    fn test_scfs_v1_with_overrides() {
+        // Create base model for V1 secret control flags
+        let scf_v1 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V1Max);
 
-        let flags = PlaintextControlFlagsV1::from_flags([
-            PcfV1::AllowDumping.enabled(),
-            PcfV1::BackupTargetKeys.enabled(),
-            PcfV1::NoComponentEncryption.enabled(),
-            PcfV1::PckmoAes.enabled(),
-            PcfV1::PckmoDeaTdea.enabled(),
-            PcfV1::PckmoEcc.enabled(),
-            PcfV1::PckmoHmac.enabled(),
+        // Verify defaults are empty
+        assert!(scf_v1.default_flags().is_empty());
+
+        // Create overrides to enable specific flags
+        let mut overrides = FlagsOverride::new();
+        overrides.enable_all([
+            SeHdrFlag::CckExtensionSecretEnforcement,
+            SeHdrFlag::CckUpdate,
         ]);
-        assert_eq!("0x00000000300000f2", format!("{flags:#x}"));
+
+        // Verify overrides were set
+        assert_eq!(overrides.len(), 2);
+        assert!(overrides.has_override(SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(overrides.has_override(SeHdrFlag::CckUpdate));
         assert_eq!(
-            format!("{flags}"),
-            " - allow dumping
- - no component encryption
- - DEA and TDEA PCKMO support
- - AES PCKMO support
- - ECC PCKMO support
- - HMAC PCKMO support
- - backup target keys support"
+            overrides.get(SeHdrFlag::CckExtensionSecretEnforcement),
+            Some(FlagState::Enabled)
+        );
+        assert_eq!(
+            overrides.get(SeHdrFlag::CckUpdate),
+            Some(FlagState::Enabled)
         );
 
-        let flags = SecretControlFlagsV1::from_flags([
-            ScfV1::CckExtensionSecretEnforcement.enabled(),
-            ScfV1::CckUpdateAllowed.enabled(),
-        ]);
-        assert_eq!(format!("{flags:#x}"), "0x6000000000000000");
-        assert_eq!(
-            format!("{flags}"),
-            " - CCK extension secret enforced
- - CCK update allowed"
-        );
+        // Apply overrides to get configured model
+        let configured_scf = scf_v1
+            .with_overrides(&overrides)
+            .expect("Valid overrides should succeed");
+
+        // Verify the configured model still has the same version and supported flags
+        assert_eq!(configured_scf.version(), SeHdrVersion::V1);
+        assert_eq!(configured_scf.known_flags().len(), 2);
+        assert!(configured_scf.has(SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(configured_scf.has(SeHdrFlag::CckUpdate));
     }
 
     #[test]
-    fn test_no_duplicates() {
-        let flags: Vec<_> = [
-            PcfV1::all_disabled([PcfV1::PckmoAes, PcfV1::PckmoDeaTdea, PcfV1::PckmoEcc]),
-            PcfV1::all_enabled([PcfV1::PckmoAes, PcfV1::PckmoDeaTdea, PcfV1::PckmoEcc]),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        assert!(!PlaintextControlFlagsV1::no_duplicates(flags));
+    fn test_scfs_v1_partial_overrides() {
+        // Create base model for V1 secret control flags
+        let scf_v1 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V1Max);
 
-        let flags: Vec<_> = [
-            PcfV1::all_disabled([PcfV1::PckmoAes]),
-            PcfV1::all_enabled([PcfV1::PckmoDeaTdea, PcfV1::PckmoEcc]),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        assert!(PlaintextControlFlagsV1::no_duplicates(flags));
+        // Create overrides to enable only one flag
+        let mut overrides = FlagsOverride::new();
+        overrides.enable(SeHdrFlag::CckExtensionSecretEnforcement);
 
-        let flags: Vec<_> =
-            std::iter::once(PcfV1::all_disabled([PcfV1::PckmoAes, PcfV1::PckmoAes]))
-                .flatten()
-                .collect();
-        assert!(!PlaintextControlFlagsV1::no_duplicates(flags));
+        // Verify only one override was set
+        assert_eq!(overrides.len(), 1);
+        assert!(overrides.has_override(SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(!overrides.has_override(SeHdrFlag::CckUpdate));
+
+        // Apply overrides
+        let configured_scf = scf_v1
+            .with_overrides(&overrides)
+            .expect("Valid overrides should succeed");
+
+        // Verify the configured model maintains version and support
+        assert_eq!(configured_scf.version(), SeHdrVersion::V1);
+        assert!(configured_scf.has(SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(!configured_scf.has(SeHdrFlag::CckUpdate));
+    }
+
+    #[test]
+    fn test_pcfs_v1_with_overrides_enable_additional() {
+        // Create base model for V1 plaintext control flags
+        let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+
+        // Verify V1 defaults: PckmoDeaTdea, PckmoAes, PckmoEcc (but NOT PckmoHmac)
+        assert_eq!(pcf_v1.default_flags().len(), 3);
+        assert!(pcf_v1.is_default(SeHdrFlag::PckmoDeaTdea));
+        assert!(pcf_v1.is_default(SeHdrFlag::PckmoAes));
+        assert!(pcf_v1.is_default(SeHdrFlag::PckmoEcc));
+        assert!(!pcf_v1.is_default(SeHdrFlag::PckmoHmac));
+        assert!(!pcf_v1.is_default(SeHdrFlag::ConfidentialDump));
+
+        // Create overrides to enable additional flags
+        let mut overrides = FlagsOverride::new();
+        overrides.enable_all([SeHdrFlag::PckmoHmac, SeHdrFlag::ConfidentialDump]);
+
+        // Verify overrides were set
+        assert_eq!(overrides.len(), 2);
+        assert!(overrides.has_override(SeHdrFlag::PckmoHmac));
+        assert!(overrides.has_override(SeHdrFlag::ConfidentialDump));
+        assert_eq!(
+            overrides.get(SeHdrFlag::PckmoHmac),
+            Some(FlagState::Enabled)
+        );
+        assert_eq!(
+            overrides.get(SeHdrFlag::ConfidentialDump),
+            Some(FlagState::Enabled)
+        );
+
+        // Apply overrides to get configured model
+        let configured_pcf = pcf_v1
+            .with_overrides(&overrides)
+            .expect("Valid overrides should succeed");
+
+        // Verify the configured model maintains version and support
+        assert_eq!(configured_pcf.version(), SeHdrVersion::V1);
+        assert!(configured_pcf.has(SeHdrFlag::PckmoHmac));
+        assert!(configured_pcf.has(SeHdrFlag::ConfidentialDump));
+    }
+
+    #[test]
+    fn test_pcfs_v1_with_overrides_disable_defaults() {
+        // Create base model for V1 plaintext control flags
+        let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+
+        // Verify V1 defaults include PckmoAes and PckmoEcc
+        assert!(pcf_v1.is_default(SeHdrFlag::PckmoAes));
+        assert!(pcf_v1.is_default(SeHdrFlag::PckmoEcc));
+
+        // Create overrides to disable some default flags
+        let mut overrides = FlagsOverride::new();
+        overrides.disable_all([SeHdrFlag::PckmoAes, SeHdrFlag::PckmoEcc]);
+
+        // Verify overrides were set to disabled
+        assert_eq!(overrides.len(), 2);
+        assert_eq!(
+            overrides.get(SeHdrFlag::PckmoAes),
+            Some(FlagState::Disabled)
+        );
+        assert_eq!(
+            overrides.get(SeHdrFlag::PckmoEcc),
+            Some(FlagState::Disabled)
+        );
+
+        // Apply overrides to get configured model
+        let configured_pcf = pcf_v1
+            .with_overrides(&overrides)
+            .expect("Valid overrides should succeed");
+
+        // Verify the configured model maintains version and support
+        assert_eq!(configured_pcf.version(), SeHdrVersion::V1);
+        assert!(!configured_pcf.has(SeHdrFlag::PckmoAes));
+        assert!(!configured_pcf.has(SeHdrFlag::PckmoEcc));
+    }
+
+    #[test]
+    fn test_asref_flexibility() {
+        // Test that both owned values and references work with AsRef-based API
+        let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+
+        // Using references (explicit)
+        assert!(pcf_v1.supports(SeHdrFlag::PckmoAes));
+        assert!(pcf_v1.is_default(SeHdrFlag::PckmoAes));
+
+        // Using owned values (also works thanks to AsRef)
+        assert!(pcf_v1.supports(SeHdrFlag::PckmoAes));
+        assert!(pcf_v1.is_default(SeHdrFlag::PckmoAes));
+
+        assert!(!pcf_v1.is_default(SeHdrFlag::ConfidentialDump));
+        assert!(!pcf_v1.is_default(SeHdrFlag::ConfidentialDump));
+    }
+
+    #[test]
+    fn test_with_overrides_supported_flags_succeed() {
+        // Create V1 model
+        let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+
+        // Enable only supported flags
+        let mut overrides = FlagsOverride::new();
+        overrides.enable_all([SeHdrFlag::ConfidentialDump, SeHdrFlag::PckmoHmac]);
+
+        // Should succeed
+        let result = pcf_v1.with_overrides(&overrides);
+        assert!(result.is_ok());
+
+        let configured = result.unwrap();
+        assert_eq!(configured.version(), SeHdrVersion::V1);
+    }
+
+    #[test]
+    fn test_overrides_update_existing() {
+        // Test that enable/disable update existing overrides (canonical way)
+        let mut overrides = FlagsOverride::new();
+
+        // Initially enable a flag
+        overrides.enable(SeHdrFlag::PckmoAes);
+        assert_eq!(overrides.get(SeHdrFlag::PckmoAes), Some(FlagState::Enabled));
+        assert_eq!(overrides.len(), 1);
+
+        // Update the same flag to disabled (canonical way)
+        overrides.disable(SeHdrFlag::PckmoAes);
+        assert_eq!(
+            overrides.get(SeHdrFlag::PckmoAes),
+            Some(FlagState::Disabled)
+        );
+        assert_eq!(overrides.len(), 1); // Still only one override
+
+        // Update again to enabled (canonical way)
+        overrides.enable(SeHdrFlag::PckmoAes);
+        assert_eq!(overrides.get(SeHdrFlag::PckmoAes), Some(FlagState::Enabled));
+        assert_eq!(overrides.len(), 1); // Still only one override
+
+        // Add a different flag
+        overrides.enable(SeHdrFlag::PckmoEcc);
+        assert_eq!(overrides.len(), 2); // Now we have two overrides
+
+        // Update the first flag again
+        overrides.disable(SeHdrFlag::PckmoAes);
+        assert_eq!(
+            overrides.get(SeHdrFlag::PckmoAes),
+            Some(FlagState::Disabled)
+        );
+        assert_eq!(overrides.get(SeHdrFlag::PckmoEcc), Some(FlagState::Enabled));
+        assert_eq!(overrides.len(), 2); // Still two overrides
+
+        // Alternative: set() can also be used but enable/disable are preferred
+        overrides.set(SeHdrFlag::PckmoAes, FlagState::Enabled);
+        assert_eq!(overrides.get(SeHdrFlag::PckmoAes), Some(FlagState::Enabled));
+        assert_eq!(overrides.len(), 2); // Still two overrides
+    }
+
+    #[test]
+    fn test_plaintext_control_flags_construction_v1() {
+        // Test construction of PlaintextControlFlags for V1
+        let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+
+        // Verify version
+        assert_eq!(pcf_v1.version(), SeHdrVersion::V1);
+
+        // Verify default flags for V1
+        let default_flags = pcf_v1.default_flags();
+        assert_eq!(default_flags.len(), 3);
+        assert!(default_flags.contains(&SeHdrFlag::PckmoDeaTdea));
+        assert!(default_flags.contains(&SeHdrFlag::PckmoAes));
+        assert!(default_flags.contains(&SeHdrFlag::PckmoEcc));
+        assert!(!default_flags.contains(&SeHdrFlag::PckmoHmac));
+
+        // Verify supported flags for V1
+        let supported_flags = pcf_v1.supported_flags();
+        assert_eq!(supported_flags.len(), 7);
+        assert!(supported_flags.contains(&SeHdrFlag::ConfidentialDump));
+        assert!(supported_flags.contains(&SeHdrFlag::NoComponentEncryption));
+        assert!(supported_flags.contains(&SeHdrFlag::PckmoDeaTdea));
+        assert!(supported_flags.contains(&SeHdrFlag::PckmoAes));
+        assert!(supported_flags.contains(&SeHdrFlag::PckmoEcc));
+        assert!(supported_flags.contains(&SeHdrFlag::PckmoHmac));
+        assert!(supported_flags.contains(&SeHdrFlag::BackupTargetKeys));
+    }
+
+    #[test]
+    fn test_secret_control_flags_construction_v1() {
+        // Test construction of SecretControlFlags for V1
+        let scf_v1 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V1Max);
+
+        // Verify version
+        assert_eq!(scf_v1.version(), SeHdrVersion::V1);
+
+        // Verify default flags for V1 (should be empty)
+        let default_flags = scf_v1.default_flags();
+        assert_eq!(default_flags.len(), 0);
+        assert!(default_flags.is_empty());
+
+        // Verify supported flags for V1
+        let supported_flags = scf_v1.supported_flags();
+        assert_eq!(supported_flags.len(), 2);
+        assert!(supported_flags.contains(&SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(supported_flags.contains(&SeHdrFlag::CckUpdate));
+    }
+
+    // Tests for Into<Msb0Flags64> trait implementations
+
+    #[test]
+    fn test_into_msb0_flags_owned() {
+        // Test Into<Msb0Flags64> for owned ControlFlagsModel
+        let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+
+        // V1 defaults: PckmoDeaTdea, PckmoAes, PckmoEcc
+        let flags: Msb0Flags64 = pcf_v1.into();
+
+        // Verify the default flags are set
+        assert!(flags.is_set(SeHdrFlag::PckmoDeaTdea.bit_position()));
+        assert!(flags.is_set(SeHdrFlag::PckmoAes.bit_position()));
+        assert!(flags.is_set(SeHdrFlag::PckmoEcc.bit_position()));
+
+        // Verify non-default flags are not set
+        assert!(!flags.is_set(SeHdrFlag::PckmoHmac.bit_position()));
+        assert!(!flags.is_set(SeHdrFlag::ConfidentialDump.bit_position()));
+    }
+
+    #[test]
+    fn test_to_msb0_flags_with_overrides() {
+        let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+
+        // Create overrides
+        let mut overrides = FlagsOverride::new();
+        overrides.enable(SeHdrFlag::ConfidentialDump);
+        overrides.disable(SeHdrFlag::PckmoAes);
+
+        let flags: Msb0Flags64 = pcf_v1.with_overrides(&overrides).unwrap().into();
+        // Verify overrides were applied
+        assert!(flags.is_set(SeHdrFlag::ConfidentialDump.bit_position()));
+        assert!(!flags.is_set(SeHdrFlag::PckmoAes.bit_position()));
+
+        // Verify other defaults remain
+        assert!(flags.is_set(SeHdrFlag::PckmoDeaTdea.bit_position()));
+        assert!(flags.is_set(SeHdrFlag::PckmoEcc.bit_position()));
+    }
+
+    #[test]
+    fn test_bit_position() {
+        // Verify bit_position returns expected values
+        assert_eq!(SeHdrFlag::CckExtensionSecretEnforcement.bit_position(), 1);
+        assert_eq!(SeHdrFlag::CckUpdate.bit_position(), 2);
+        assert_eq!(SeHdrFlag::ConfidentialDump.bit_position(), 34);
+        assert_eq!(SeHdrFlag::NoComponentEncryption.bit_position(), 35);
+        assert_eq!(SeHdrFlag::PckmoDeaTdea.bit_position(), 56);
+        assert_eq!(SeHdrFlag::PckmoAes.bit_position(), 57);
+        assert_eq!(SeHdrFlag::PckmoEcc.bit_position(), 58);
+        assert_eq!(SeHdrFlag::PckmoHmac.bit_position(), 59);
+        assert_eq!(SeHdrFlag::BackupTargetKeys.bit_position(), 62);
+    }
+
+    #[test]
+    fn test_asref_trait() {
+        // Test that AsRef<Self> works for flags
+        let flag = SeHdrFlag::PckmoAes;
+        let flag_ref: &SeHdrFlag = flag.as_ref();
+        assert_eq!(*flag_ref, flag);
+    }
+
+    // Tests for from_u64 method
+
+    #[test]
+    fn test_effective_control_flags_from_u64_pcf_v1() {
+        // Test creating EffectiveControlFlags from u64 for PCF V1
+        let mut value = 0u64;
+        // Set some PCF V1 flags
+        value |= 1u64 << (63 - SeHdrFlag::ConfidentialDump.bit_position());
+        value |= 1u64 << (63 - SeHdrFlag::PckmoAes.bit_position());
+        value |= 1u64 << (63 - SeHdrFlag::PckmoDeaTdea.bit_position());
+
+        let flags = SeHdrControlFlags::from_u64(value, SeTarget::V1Max, true);
+
+        assert_eq!(flags.version(), SeHdrVersion::V1);
+        assert!(flags.has(SeHdrFlag::ConfidentialDump));
+        assert!(flags.has(SeHdrFlag::PckmoAes));
+        assert!(flags.has(SeHdrFlag::PckmoDeaTdea));
+        assert!(!flags.has(SeHdrFlag::PckmoHmac)); // Not set
+    }
+
+    #[test]
+    fn test_effective_control_flags_from_u64_scf_v1() {
+        // Test creating EffectiveControlFlags from u64 for SCF V1
+        let mut value = 0u64;
+        // Set some SCF V1 flags
+        value |= 1u64 << (63 - SeHdrFlag::CckExtensionSecretEnforcement.bit_position());
+        value |= 1u64 << (63 - SeHdrFlag::CckUpdate.bit_position());
+
+        let flags = SeHdrControlFlags::from_u64(value, SeTarget::V1Max, false);
+
+        assert_eq!(flags.version(), SeHdrVersion::V1);
+        assert!(flags.has(SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(flags.has(SeHdrFlag::CckUpdate));
+    }
+
+    #[test]
+    fn test_effective_control_flags_from_u64_with_unknown_bits() {
+        // Test that unknown/unsupported bits are tracked
+        let mut value = 0u64;
+        // Set a known flag
+        value |= 1u64 << (63 - SeHdrFlag::PckmoAes.bit_position());
+        // Set some unknown bits
+        value |= 1u64 << 10; // Random bit that's not a known flag
+
+        let flags = SeHdrControlFlags::from_u64(value, SeTarget::V1Max, true);
+
+        assert!(flags.has(SeHdrFlag::PckmoAes));
+        // Unknown flags should be tracked
+        assert_ne!(flags.unknown_flags().bits(), 0);
+    }
+
+    #[test]
+    fn test_effective_control_flags_from_u64_roundtrip() {
+        // Test roundtrip: create flags, convert to u64, convert back
+        let mut value = 0u64;
+        value |= 1u64 << (63 - SeHdrFlag::ConfidentialDump.bit_position());
+        value |= 1u64 << (63 - SeHdrFlag::PckmoAes.bit_position());
+        value |= 1u64 << (63 - SeHdrFlag::BackupTargetKeys.bit_position());
+
+        let flags1 = SeHdrControlFlags::from_u64(value, SeTarget::V1Max, true);
+        let value2 = flags1.to_u64();
+        let flags2 = SeHdrControlFlags::from_u64(value2, SeTarget::V1Max, true);
+
+        assert_eq!(flags1.known_flags(), flags2.known_flags());
+        assert_eq!(flags1.unknown_flags(), flags2.unknown_flags());
+    }
+
+    #[test]
+    fn test_effective_control_flags_from_u64_empty() {
+        // Test with no flags set
+        let value = 0u64;
+        let flags = SeHdrControlFlags::from_u64(value, SeTarget::V1Max, true);
+
+        assert_eq!(flags.version(), SeHdrVersion::V1);
+        assert_eq!(flags.known_flags().len(), 0);
+        assert_eq!(flags.unknown_flags().bits(), 0);
     }
 }

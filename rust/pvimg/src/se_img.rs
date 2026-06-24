@@ -18,9 +18,7 @@ use pvimg::misc::{round_up, serialize_to_bytes, ShortPsw, PSW, PSW_MASK_BA, PSW_
 use pvimg::secured_comp::{
     ComponentTrait, Interval, Layout, SecuredComponent, SecuredComponentBuilder,
 };
-use pvimg::uvdata::{
-    BuilderTrait, PlaintextControlFlagsV1, SeHdrBuilder, SeHdrVersion, SecretControlFlagsV1,
-};
+use pvimg::uvdata::{BuilderTrait, EffectiveControlFlags, SeHdrBuilder, SeHdrFlag, SeHdrVersion};
 
 use crate::se_img_comps::ipib::Ipib;
 use crate::se_img_comps::kernel::S390Kernel;
@@ -34,8 +32,8 @@ use crate::se_img_comps::{
 
 pub struct SeHdrArgs<'a> {
     pub keys: &'a [PKey<Public>],
-    pub pcf: &'a PlaintextControlFlagsV1,
-    pub scf: &'a SecretControlFlagsV1,
+    pub pcf: &'a EffectiveControlFlags<SeHdrFlag>,
+    pub scf: &'a EffectiveControlFlags<SeHdrFlag>,
     pub cck: &'a Option<(PathBuf, Confidential<Vec<u8>>)>,
     pub hdr_aead_key: &'a Option<(PathBuf, Confidential<Vec<u8>>)>,
     pub psw_addr: &'a Option<u64>,

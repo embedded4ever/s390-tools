@@ -13,7 +13,31 @@ use std::string::ToString;
 use clap::builder::{PossibleValue, TypedValueParser};
 use clap::{Arg, ArgGroup, Args, Command, CommandFactory, Parser, ValueEnum, ValueHint};
 use log::warn;
-use utils::{CertificateOptions, DeprecatedVerbosityOptions};
+use utils::{CertificateOptions, DeprecatedVerbosityOptions, ValueEnumDisplay};
+
+/// SE header control flags for CLI
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ValueEnum, ValueEnumDisplay)]
+#[value(rename_all = "kebab-case")]
+pub enum SeHdrFlagName {
+    /// Confidential guest dump support
+    ConfidentialDump,
+    /// DEA/TDEA PCKMO key encryption support
+    PckmoDeaTdea,
+    /// AES PCKMO key encryption support
+    PckmoAes,
+    /// ECC PCKMO key encryption support
+    PckmoEcc,
+    /// HMAC PCKMO key encryption support
+    PckmoHmac,
+    /// Backup target keys support
+    BackupTargetKeys,
+    /// CCK-derived extension secret enforcement for add-secret requests
+    CckExtensionSecretEnforcement,
+    /// CCK update support
+    CckUpdate,
+    /// Image components without encryption
+    NoComponentEncryption,
+}
 
 /// Create and inspect IBM Secure Execution images.
 ///
@@ -56,6 +80,28 @@ impl CliOptions {
     }
 }
 
+/// Defines a requirement rule for CLI validation.
+///
+/// A requirement specifies that certain flags require a specific option to be present.
+/// For example, the `ConfidentialDump` flag requires the `--cck` option.
+struct Requirement {
+    /// The flags that trigger this requirement
+    flags: &'static [SeHdrFlagName],
+    /// The option name that must be present (e.g., "cck")
+    option: &'static str,
+    /// Whether the required option is present
+    present: bool,
+}
+
+/// Defines a set of flags that cannot be used together.
+///
+/// When multiple flags from this set are present in the command line,
+/// a validation error is raised with a dynamically generated message
+/// listing the conflicting flags.
+struct MutuallyExclusiveFlags {
+    flags: &'static [SeHdrFlagName],
+}
+
 /// Validates the given command line options.
 ///
 /// # Errors
@@ -71,6 +117,92 @@ pub fn validate_cli(opts: &CliOptions) -> Result<(), clap::error::Error> {
             {
                 warn!("Use bootloader directory: {}", dir.display());
             }
+
+            // Check that a user provided CCK is available
+            let rules = [Requirement {
+                flags: &[
+                    SeHdrFlagName::ConfidentialDump,
+                    SeHdrFlagName::CckExtensionSecretEnforcement,
+                ],
+                option: LONG_FLAG_CCK,
+                present: create_opts.keys.cck.is_some(),
+            }];
+            for r in rules {
+                let offenders: Vec<_> = r
+                    .flags
+                    .iter()
+                    .filter(|f| create_opts.flags.contains(f))
+                    .collect();
+
+                if !offenders.is_empty() && !r.present {
+                    return Err(clap::Error::raw(
+                        clap::error::ErrorKind::MissingRequiredArgument,
+                        format!(
+                            "flag(s) {} require(s) --{}",
+                            offenders
+                                .iter()
+                                .map(|f| format!("{:?}", f))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            r.option
+                        ),
+                    ));
+                }
+            }
+
+            // Check for conflicts between --flags and --disable-flags
+            if !create_opts.flags.is_empty() && !create_opts.disable_flags.is_empty() {
+                use std::collections::HashSet;
+                let flags_set: HashSet<_> = create_opts.flags.iter().collect();
+                let disable_flags_set: HashSet<_> = create_opts.disable_flags.iter().collect();
+
+                let conflicts: Vec<_> = flags_set
+                    .intersection(&disable_flags_set)
+                    .copied()
+                    .collect();
+
+                if !conflicts.is_empty() {
+                    return Err(clap::Error::raw(
+                        clap::error::ErrorKind::ArgumentConflict,
+                        // Print the flag name using the kebab-case notation (using to_possible_value)
+                        format!(
+                            "Conflicting flags detected: the following flags are specified in both --flags and --disable-flags: {}",
+                            conflicts.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", ")
+                        ),
+                    ));
+                }
+            }
+
+            // Check for mutually exclusive flags within --flags
+            let exclusion_rules = [MutuallyExclusiveFlags {
+                flags: &[
+                    SeHdrFlagName::CckExtensionSecretEnforcement,
+                    SeHdrFlagName::CckUpdate,
+                ],
+            }];
+
+            for rule in exclusion_rules {
+                let conflicting_flags: Vec<_> = rule
+                    .flags
+                    .iter()
+                    .filter(|f| create_opts.flags.contains(f))
+                    .collect();
+
+                if conflicting_flags.len() > 1 {
+                    return Err(clap::Error::raw(
+                        clap::error::ErrorKind::ArgumentConflict,
+                        format!(
+                            "The following flags cannot be used together: {}",
+                            conflicting_flags
+                                .iter()
+                                .map(|f| format!("'{}'", f))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    ));
+                }
+            }
+
             Ok(())
         }
         _ => Ok(()),
@@ -100,6 +232,8 @@ pub struct ComponentPaths {
     pub parmfile: Option<PathBuf>,
 }
 
+const LONG_FLAG_CCK: &str = "cck";
+
 /// CLI Argument collection for handling user-provided keys.
 #[derive(Args, Debug)]
 #[cfg_attr(test, derive(Default))]
@@ -109,7 +243,7 @@ pub struct UserKeys {
     /// The file must contain exactly 32 bytes of data. In previous versions,
     /// this option was called '--comm-key'.
     #[arg(
-        long,
+        long = LONG_FLAG_CCK,
         value_name = "FILE",
         group = "cck-available",
         visible_alias = "comm-key"
@@ -546,7 +680,30 @@ pub struct CreateBootImageArgs {
     pub keys: UserKeys,
 
     #[clap(flatten)]
+    // TODO Declare as deprecated
     pub legacy_flags: CreateBootImageLegacyFlags,
+
+    /// Set control flags using comma-separated flag names.
+    ///
+    /// Specify flags to enable using their names.
+    #[arg(
+        long,
+        value_name = "FLAGS",
+        value_delimiter = ',',
+        conflicts_with_all = ["header-flags", "x_pcf", "x_scf"]
+    )]
+    pub flags: Vec<SeHdrFlagName>,
+
+    /// Set control flags using comma-separated flag names.
+    ///
+    /// Specify flags to disable using their names.
+    #[arg(
+        long,
+        value_name = "FLAGS",
+        value_delimiter = ',',
+        conflicts_with_all = ["header-flags", "x_pcf", "x_scf"]
+    )]
+    pub disable_flags: Vec<SeHdrFlagName>,
 
     #[clap(flatten)]
     pub experimental_args: CreateBootImageExperimentalArgs,
@@ -734,14 +891,44 @@ mod test {
             // --comm-key with --enable-cck-update (alias test)
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("comm-key", ["--comm-key", "/dev/null"]),
                                                        CliOption::new("enable-cck-update", ["--enable-cck-update"])])),
+
+            // --disable-flags tests
+            // Test --disable-flags alone
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("disable-flags", ["--disable-flags", &SeHdrFlagName::PckmoHmac.to_string()])])),
+            // Test --flags and --disable-flags without conflict
+            flat_map_collect(insert(mvca.clone(), vec![
+                CliOption::new("flags", ["--flags", &SeHdrFlagName::ConfidentialDump.to_string()]),
+                CliOption::new("disable-flags", ["--disable-flags", &SeHdrFlagName::PckmoHmac.to_string()]),
+                CliOption::new("cck", ["--cck", "/dev/null"])
+            ])),
+            // Test multiple --disable-flags
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("disable-flags", ["--disable-flags", &format!("{},{}", SeHdrFlagName::PckmoHmac, SeHdrFlagName::BackupTargetKeys)])])),
+            // Test --flags and --disable-flags with different flags
+            flat_map_collect(insert(mvca.clone(), vec![
+                CliOption::new("flags", ["--flags", &format!("{},{}", SeHdrFlagName::ConfidentialDump, SeHdrFlagName::BackupTargetKeys)]),
+                CliOption::new("disable-flags", ["--disable-flags", &format!("{},{}", SeHdrFlagName::PckmoHmac, SeHdrFlagName::NoComponentEncryption)]),
+                CliOption::new("cck", ["--cck", "/dev/null"])
+            ])),
+
+            // --flags tests (equivalent to --enable-* tests)
+            // Test --flags with confidential-dump (equivalent to --enable-dump)
+            flat_map_collect(insert(mvca.clone(), vec![
+                CliOption::new("flags", ["--flags", &SeHdrFlagName::ConfidentialDump.to_string()]),
+                CliOption::new("cck", ["--cck", "/dev/null"])
+            ])),
+            // Test with all PCKMO flags
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("flags", ["--flags", &format!("{},{},{},{}",
+                                                                                                    SeHdrFlagName::PckmoDeaTdea, SeHdrFlagName::PckmoAes, SeHdrFlagName::PckmoEcc, SeHdrFlagName::PckmoHmac)])])),
+
+            // Test with NoComponentEncryption flag
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("flags", ["--flags", &SeHdrFlagName::NoComponentEncryption.to_string()])])),
         ];
         let invalid_create_args = [
             flat_map_collect(remove(mvcanv.clone(), "no-verify")),
             flat_map_collect(remove(mvcanv.clone(), "image")),
             flat_map_collect(remove(mvcanv.clone(), "hkd")),
             flat_map_collect(remove(mvcanv, "output")),
-
-            // missing both `--cck' and `--enable-cck-update'
+            // missing both `--cck' and `--enable-cck-update' (required by --enable-dump)
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("enable-dump", ["--enable-dump"])])),
 
             // -v and -q cannot be combined
@@ -783,6 +970,51 @@ mod test {
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("enable-cck-extension-secret", ["--enable-cck-extension-secret"]),
                                                        CliOption::new("enable-cck-update", ["--enable-cck-update"]),
                                                        CliOption::new("cck", ["--cck", "/dev/null"])])),
+
+            // --disable-flags conflict tests
+            // Test conflict between --flags and --disable-flags (same flag in both)
+            flat_map_collect(insert(mvca.clone(), vec![
+                CliOption::new("flags", ["--flags", &SeHdrFlagName::ConfidentialDump.to_string()]),
+                CliOption::new("disable-flags", ["--disable-flags", &SeHdrFlagName::ConfidentialDump.to_string()]),
+                CliOption::new("cck", ["--cck", "/dev/null"])
+            ])),
+            // Test multiple conflicts
+            flat_map_collect(insert(mvca.clone(), vec![
+                CliOption::new("flags", ["--flags", &format!("{},{}", SeHdrFlagName::ConfidentialDump, SeHdrFlagName::PckmoHmac)]),
+                CliOption::new("disable-flags", ["--disable-flags", &format!("{},{}", SeHdrFlagName::ConfidentialDump, SeHdrFlagName::PckmoHmac)]),
+                CliOption::new("cck", ["--cck", "/dev/null"])
+            ])),
+
+            // --flags conflicts with --x-pcf
+            flat_map_collect(insert(mvca.clone(), vec![
+                CliOption::new("flags", ["--flags", &SeHdrFlagName::ConfidentialDump.to_string()]),
+                CliOption::new("x-pcf", ["--x-pcf", "0x0"]),
+                CliOption::new("cck", ["--cck", "/dev/null"])
+            ])),
+            // --flags conflicts with --x-scf
+            flat_map_collect(insert(mvca.clone(), vec![
+                CliOption::new("flags", ["--flags", &SeHdrFlagName::ConfidentialDump.to_string()]),
+                CliOption::new("x-scf", ["--x-scf", "0x0"]),
+                CliOption::new("cck", ["--cck", "/dev/null"])
+            ])),
+            // --disable-flags conflicts with --x-pcf
+            flat_map_collect(insert(mvca.clone(), vec![
+                CliOption::new("disable-flags", ["--disable-flags", &SeHdrFlagName::PckmoHmac.to_string()]),
+                CliOption::new("x-pcf", ["--x-pcf", "0x0"])
+            ])),
+            // --disable-flags conflicts with --x-scf
+            flat_map_collect(insert(mvca.clone(), vec![
+                CliOption::new("disable-flags", ["--disable-flags", &SeHdrFlagName::PckmoHmac.to_string()]),
+                CliOption::new("x-scf", ["--x-scf", "0x0"])
+            ])),
+
+            // Test --flags with cck-extension-secret and cck-update and --cck
+            // (conflict, equivalent to --enable-cck-extension-secret)
+            flat_map_collect(insert(mvca, vec![
+                CliOption::new("flags-cck-extension-secret", ["--flags", &SeHdrFlagName::CckExtensionSecretEnforcement.to_string()]),
+                CliOption::new("flags-enable-cck-update", ["--flags", &SeHdrFlagName::CckUpdate.to_string()]),
+                CliOption::new("cck", ["--cck", "/dev/null"])
+            ])),
         ];
 
         let mut genprotimg_valid_args = vec![
@@ -825,7 +1057,11 @@ mod test {
 
         for arg in pvimg_invalid_args {
             let res = CliOptions::try_parse_from(&arg);
-            assert!(res.is_err());
+            // For some conflict tests, parsing succeeds but validation should fail
+            if let Ok(opts) = res {
+                // This should be caught by validate_cli
+                assert!(validate_cli(&opts).is_err(), "Expected validation to fail for conflicting flags");
+            }
         }
 
         for arg in genprotimg_valid_args {
@@ -840,7 +1076,12 @@ mod test {
 
         for arg in genprotimg_invalid_args {
             let res = GenprotimgCliOptions::try_parse_from(&arg);
-            assert!(res.is_err());
+            // For conflict tests, parsing succeeds but validation should fail
+            if let Ok(genprotimg_opts) = res {
+                let opts: CliOptions = genprotimg_opts.into();
+                // This should be caught by validate_cli
+                assert!(validate_cli(&opts).is_err(), "Expected validation to fail for conflicting flags");
+            }
         }
     }
 

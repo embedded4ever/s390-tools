@@ -36,11 +36,11 @@ pub mod misc {
 
 pub mod uvdata {
     pub use crate::pv_utils::{
-        AeadPlainDataTrait, BuilderTrait, ComponentMetadataV1, ControlFlagTrait, ControlFlagsTrait,
-        EnvelopeSeHdrV1, FlagData, KeyExchangeTrait, PcfV1, PlaintextControlFlagsV1, ScfV1, SeH,
-        SeHdr, SeHdrAadV1, SeHdrBinV1, SeHdrBuilder, SeHdrData, SeHdrDataV1, SeHdrPlain,
-        SeHdrVersion, SeHdrVersioned, SecretControlFlagsV1, UvDataPlainTrait, UvDataTrait,
-        UvKeyHashesV1,
+        AeadPlainDataTrait, BuilderTrait, ComponentMetadataV1, ControlFlagTrait,
+        EffectiveControlFlags, EnvelopeSeHdrV1, FlagData, FlagState, FlagsOverride,
+        IntoEnumIterator, KeyExchangeTrait, SeH, SeHdr, SeHdrAadV1, SeHdrBinV1, SeHdrBuilder,
+        SeHdrControlFlags, SeHdrControlFlagsModel, SeHdrData, SeHdrDataV1, SeHdrFlag, SeHdrPlain,
+        SeHdrVersion, SeHdrVersioned, SeTarget, UvDataPlainTrait, UvDataTrait, UvKeyHashesV1,
     };
 }
 

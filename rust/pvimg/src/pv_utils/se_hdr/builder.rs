@@ -5,7 +5,7 @@
 use pv::request::Confidential;
 
 use super::hdr_v1::SeHdrDataV1;
-use super::SeHdr;
+use super::{EffectiveControlFlags, SeHdr, SeHdrFlag};
 use crate::pv_utils::error::{Error, Result};
 use crate::pv_utils::se_hdr::brb::{
     SeHdrCommon, SeHdrConfBuilderTrait, SeHdrData, SeHdrPubBuilderTrait,
@@ -15,7 +15,7 @@ use crate::pv_utils::uvdata::UvDataPlainTrait;
 use crate::pv_utils::uvdata_builder::{
     AeadCipherBuilderTrait, BuilderTrait, KeyExchangeBuilderTrait, UvDataBuilder,
 };
-use crate::pv_utils::{PlaintextControlFlagsV1, SecretControlFlagsV1, PSW};
+use crate::pv_utils::PSW;
 
 /// `SeHdrBuilder`
 pub type SeHdrBuilder<'a> = UvDataBuilder<'a, SeHdrPlain>;
@@ -67,12 +67,12 @@ impl SeHdrBuilder<'_> {
         Ok(self)
     }
 
-    pub fn with_pcf(&mut self, flags: &PlaintextControlFlagsV1) -> Result<&mut Self> {
+    pub fn with_pcf(&mut self, flags: &EffectiveControlFlags<SeHdrFlag>) -> Result<&mut Self> {
         self.plain_data.data.set_pcf(flags)?;
         Ok(self)
     }
 
-    pub fn with_scf(&mut self, flags: &SecretControlFlagsV1) -> Result<&mut Self> {
+    pub fn with_scf(&mut self, flags: &EffectiveControlFlags<SeHdrFlag>) -> Result<&mut Self> {
         self.plain_data.data.set_scf(flags)?;
         Ok(self)
     }
