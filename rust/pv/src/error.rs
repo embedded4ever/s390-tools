@@ -84,6 +84,9 @@ pub enum Error {
     #[error("The provided host key document in {0} contains no certificate!")]
     NoHkdInFile(String),
 
+    #[error("The provided host key document in {0} contains the wrong number of keys!")]
+    WrongNumberOfKeys(String),
+
     #[error("Invalid input size ({0}) for boot hdr")]
     InvBootHdrSize(usize),
 
@@ -135,6 +138,9 @@ pub enum Error {
 
     #[error("Unsupported cipher: {:?}", .0.as_raw())]
     UnsupportedCipher(Nid),
+
+    #[error("{}", .0)]
+    InvalidHkd(String),
 }
 
 // used in macros

@@ -79,7 +79,7 @@ pub mod pem {
 pub mod misc {
     pub use pv_core::misc::*;
 
-    pub use crate::utils::read_certs;
+    pub use crate::utils::{read_certs, read_hkd};
 }
 
 pub use error::{Error, Result};
@@ -95,7 +95,9 @@ pub mod request {
         AeadDecryptionResult, AeadEncryptionResult, Aes256GcmKey, Aes256XtsKey, SymKey, SymKeyType,
         SHA_512_HASH_LEN,
     };
-    pub use crate::req::{EcPubKeyCoord, Encrypt, HostKey, Keyslot, ReqEncrCtx, Request};
+    pub use crate::req::{
+        EcPubKeyCoord, Encrypt, HostKey, HybridPKey, Keyslot, ReqEncrCtx, Request,
+    };
     pub use crate::verify::{CertVerifier, HkdVerifier, NoVerifyHkd};
 
     /// Reexports some useful OpenSSL symbols

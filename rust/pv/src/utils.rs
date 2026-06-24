@@ -1,9 +1,14 @@
+use std::path::Path;
+
 // SPDX-License-Identifier: MIT
 //
 // Copyright IBM Corp. 2023
+use log::{error, info};
 use openssl::error::ErrorStack;
 use openssl::x509::{X509Crl, X509};
+use pv_core::misc::read_file;
 
+use crate::req::{HostKey, HybridPKey};
 use crate::{Error, Result};
 
 /// Read all CRLs from the buffer and parse them into a vector.
@@ -29,6 +34,49 @@ pub fn read_certs<T: AsRef<[u8]>>(buf: T) -> Result<Vec<X509>, ErrorStack> {
     X509::from_der(buf.as_ref())
         .map(|crt| vec![crt])
         .or_else(|_| X509::stack_from_pem(buf.as_ref()))
+}
+
+/// Read a host-key document from a file.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - The file cannot be read
+/// - The content is not valid PEM or DER format
+/// - The file contains no certificates or more than 2 certificates
+/// - The public key cannot be extracted from the certificate(s)
+pub fn read_hkd<P: AsRef<Path>>(path: P) -> Result<HostKey> {
+    let path = path.as_ref();
+    let hk = read_file(path, "host-key document")?;
+    let certs = read_certs(&hk).map_err(|source| Error::HkdNotPemOrDer {
+        hkd: path.display().to_string(),
+        source,
+    })?;
+    if certs.is_empty() {
+        return Err(Error::NoHkdInFile(path.display().to_string()));
+    }
+    let c1 = certs.first().unwrap();
+    match certs.len() {
+        1 => {
+            info!("Using version 1 of the host-key document format");
+            Ok(HostKey::V1(c1.public_key()?))
+        }
+        2 => {
+            info!("Using version 2 of the host-key document format");
+            let c2 = &certs[1];
+            Ok(HostKey::V2(HybridPKey::new(
+                c1.public_key()?,
+                c2.public_key()?,
+            )?))
+        }
+        _ => {
+            error!(
+                "Invalid host-key document '{}': it contains more than two certificates, which is not supported by any host-key document format.",
+                    path.display()
+            );
+            Err(Error::WrongNumberOfKeys(path.display().to_string()))
+        }
+    }
 }
 
 #[cfg(test)]

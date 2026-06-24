@@ -1,7 +1,7 @@
-use std::fmt::Display;
 // SPDX-License-Identifier: MIT
 //
-// Copyright IBM Corp. 2023, 2024
+// Copyright IBM Corp.
+use std::fmt::Display;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
@@ -11,10 +11,12 @@ use std::str::FromStr;
 use clap::builder::{EnumValueParser, PossibleValue, TypedValueParser};
 use clap::{Arg, ArgAction, ArgGroup, Args, Command, ValueEnum, ValueHint};
 use log::{info, warn, LevelFilter};
+use openssl::Nid;
 use pv::misc::{create_file, open_file, read_certs, read_file};
-use pv::request::openssl::pkey::{PKey, Public};
-use pv::request::HkdVerifier;
+use pv::request::openssl::pkey::{KeyType, PKey, PKeyRef, Public};
+use pv::request::{openssl, HkdVerifier, HostKey, HybridPKey};
 use pv::{Error, Result};
+use utils_macros::{ValueEnumDisplay, ValueEnumFromStr};
 
 /// Generic version selection for CLI
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +132,17 @@ where
         Some(Box::new(values.into_iter()))
     }
 }
+
+/// Host key document version for CLI
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, ValueEnumDisplay, ValueEnumFromStr)]
+pub enum HkdVersion {
+    /// Version 1 - uses traditional cryptographic keys
+    Classical,
+    /// Version 2 - uses hybrid (post-quantum) cryptographic keys
+    Hybrid,
+}
+
+pub type HkdVersionSelection = AutoOrExplicit<HkdVersion>;
 
 /// CLI Argument collection for handling host-keys, IBM signing keys, and certificates.
 #[derive(Args, Debug, Clone, PartialEq, Eq, Default)]
@@ -260,6 +273,105 @@ impl CertificateOptions {
             verifier.verify(c)?;
             res.push(c.public_key()?);
             info!("Use host-key document at '{}'", hkd.display());
+        }
+        Ok(res)
+    }
+
+    fn is_ec_p521_key(key: &PKeyRef<Public>) -> bool {
+        if key.id() == openssl::pkey::Id::EC {
+            let ec_key = key.ec_key().unwrap();
+            let group = ec_key.group();
+            let curve_nid = group.curve_name().unwrap();
+            curve_nid == Nid::SECP521R1
+        } else {
+            false
+        }
+    }
+
+    fn is_mlkem1024_key(key: &PKeyRef<Public>) -> bool {
+        key.is_a(KeyType::ML_KEM_1024)
+    }
+
+    /// Read the hybrid host-keys specified and verifies them if required
+    ///
+    /// - `protectee`: what you want to create. e.g. add-secret request or SE-image
+    /// - `version`: requested host-key document version
+    ///
+    /// # Error
+    /// Returns an error if something went wrong during parsing the HKDs, the verification chain
+    /// could not built, or when the verification
+    /// failed.
+    pub fn get_verified_hkds_new(
+        &self,
+        protectee: &'static str,
+        requested_version: HkdVersionSelection,
+    ) -> Result<Vec<HostKey>> {
+        let hkds = &self.host_key_documents;
+        let verifier = self.verifier(protectee)?;
+
+        let mut res = Vec::with_capacity(hkds.len());
+        for hkd in hkds {
+            let hk = read_file(hkd, "host-key document")?;
+            let certs = read_certs(&hk).map_err(|source| Error::HkdNotPemOrDer {
+                hkd: hkd.display().to_string(),
+                source,
+            })?;
+            if certs.is_empty() {
+                return Err(Error::NoHkdInFile(hkd.display().to_string()));
+            }
+            let required_cert_count = match requested_version {
+                HkdVersionSelection::Auto => {
+                    info!("Auto-detecting version of the host-key document format");
+                    match certs.len() {
+                        1 => 1,
+                        2 => 2,
+                        _ => {
+                            warn!(
+                                "The host-key document in '{}' contains more than two certificates!",
+                                hkd.display()
+                            );
+                            return Err(Error::WrongNumberOfKeys(hkd.display().to_string()));
+                        }
+                    }
+                }
+                HkdVersionSelection::Explicit(HkdVersion::Classical) => {
+                    info!("Using version 1 of the host-key document format");
+                    1
+                }
+                HkdVersionSelection::Explicit(HkdVersion::Hybrid) => {
+                    info!("Using version 2 of the host-key document format");
+                    2
+                }
+            };
+            if required_cert_count != certs.len() {
+                return Err(Error::WrongNumberOfKeys(hkd.display().to_string()));
+            }
+            let c1 = certs.first().unwrap();
+            if !Self::is_ec_p521_key(c1.public_key()?.as_ref()) {
+                return Err(Error::InvalidHkd(
+                    "First key must be a EC-p521 key".to_string(),
+                ));
+            }
+            verifier.verify(c1)?;
+            match certs.len() {
+                1 => {
+                    res.push(HostKey::V1(c1.public_key()?));
+                }
+                2 => {
+                    let c2 = &certs[1];
+                    if !Self::is_mlkem1024_key(c2.public_key()?.as_ref()) {
+                        return Err(Error::InvalidHkd(
+                            "Second key must be a ML-KEM 1024 key".to_string(),
+                        ));
+                    }
+                    verifier.verify(c2)?;
+                    res.push(HostKey::V2(HybridPKey::new(
+                        c1.public_key()?,
+                        c2.public_key()?,
+                    )?))
+                }
+                _ => unreachable!("Already checked"),
+            }
         }
         Ok(res)
     }
