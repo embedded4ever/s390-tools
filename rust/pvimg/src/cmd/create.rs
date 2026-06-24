@@ -6,7 +6,7 @@ use std::fs::OpenOptions;
 use std::io::BufReader;
 
 use anyhow::{Context, Result};
-use log::{debug, warn};
+use log::{info, debug, warn};
 use pv::misc::{open_file, try_parse_u64};
 use pvimg::error::OwnExitCode;
 use pvimg::secured_comp::ComponentTrait;
@@ -105,14 +105,14 @@ fn parse_flags(
         None => PlaintextControlFlagsV1::default(),
     };
     pcf.parse_flags(&plaintext_flags);
-    debug!("Using plaintext flags: {pcf:#x}");
+    info!("Using plaintext flags: {pcf:#x}");
 
     let mut scf: SecretControlFlagsV1 = match &args.experimental_args.x_scf {
         Some(v) => try_parse_u64(v, "x-scf")?.into(),
         None => SecretControlFlagsV1::default(),
     };
     scf.parse_flags(&secret_flags);
-    debug!("Using secret flags:    {scf:#x}");
+    info!("Using secret flags:    {scf:#x}");
 
     Ok((pcf, scf))
 }
