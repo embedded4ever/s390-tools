@@ -94,7 +94,7 @@ pub enum Error {
     BinArcbInvVersion(u32),
 
     #[error(
-        "The attestation request encrypted sice is to0 small {0}. Request probably tampered with."
+        "The attestation request encrypted sice is too small {0}. Request probably tampered with."
     )]
     BinArcbSeaSmall(u32),
 
