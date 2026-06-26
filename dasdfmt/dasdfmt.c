@@ -1566,6 +1566,8 @@ int main(int argc, char *argv[])
 	g.ese = dasd_sys_ese(g.dev_node);
 	eval_format_mode();
 
+	check_disk();
+
 	/* Either let the user specify the blksize or get it from the kernel */
 	if (!g.blksize_specified) {
 		if (!(mode == FULL ||
@@ -1586,8 +1588,6 @@ int main(int argc, char *argv[])
 		else
 			error("VOLSER not found on device %s", g.dev_path);
 	}
-
-	check_disk();
 
 	if (check_param(str, ERR_LENGTH, &format_params) < 0)
 		error("%s", str);
