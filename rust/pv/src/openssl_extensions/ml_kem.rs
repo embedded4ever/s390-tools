@@ -2,7 +2,7 @@
 //
 // Copyright IBM Corp.
 
-#![expect(unused)]
+#![cfg_attr(not(test), expect(unused))]
 
 use std::ffi::CStr;
 use std::ptr::NonNull;
