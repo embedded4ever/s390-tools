@@ -9,7 +9,8 @@ use openssl::pkey::{PKey, PKeyRef, Private, Public};
 
 use super::ec_coord::EcPubKeyCoord;
 use super::encrypt::Encrypt;
-use crate::crypto::{derive_aes256_gcm_key, encrypt_aead, hash};
+#[expect(unused)]
+use crate::crypto::{derive_aes256_gcm_key, derive_aes256_gcm_key_hybrid, encrypt_aead, hash};
 use crate::request::HostKey;
 use crate::Result;
 

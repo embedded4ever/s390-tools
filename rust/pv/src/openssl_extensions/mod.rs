@@ -14,5 +14,4 @@ mod stackable_crl;
 pub use akid::*;
 pub use bio::*;
 pub use crl::*;
-#[expect(unused_imports)]
 pub use ml_kem::*;

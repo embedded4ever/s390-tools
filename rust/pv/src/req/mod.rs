@@ -17,6 +17,7 @@ mod request;
 
 // Re-export public types
 pub use context::ReqEncrCtx;
+pub(crate) use ec_coord::get_pub_ecdh_points;
 pub use ec_coord::EcPubKeyCoord;
 pub use encrypt::{Aad, Encrypt};
 pub use header::RequestHdr;

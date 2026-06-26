@@ -47,7 +47,10 @@ impl EcPubKeyCoord {
 
 /// Get the pub ECDH coordinates in the format the Ultravisor expects it:
 /// The two coordinates are padded to 80 bytes each.
-fn get_pub_ecdh_points(pkey: &EcPointRef, grp: &EcGroupRef) -> Result<[u8; 160], ErrorStack> {
+pub(crate) fn get_pub_ecdh_points(
+    pkey: &EcPointRef,
+    grp: &EcGroupRef,
+) -> Result<[u8; 160], ErrorStack> {
     let mut x = BigNum::new()?;
     let mut y = BigNum::new()?;
     let mut bn_ctx = BigNumContext::new()?;

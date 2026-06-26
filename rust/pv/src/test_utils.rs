@@ -89,6 +89,27 @@ pub fn get_test_key_and_cert() -> (PKey<Private>, X509) {
     (cust_key, host_key)
 }
 
+pub fn get_test_key_and_cert_hybrid() -> (PKey<Private>, X509, X509) {
+    let pub_key = get_test_asset!("keys/public_cust.bin");
+    let priv_key = get_test_asset!("keys/private_cust.bin");
+    let host_key = get_test_asset!("keys/host.ec.crt");
+    let host_keys = get_test_asset!("keys/host.hybrid.crt");
+
+    assert_eq!(pub_key.len(), 160);
+    assert_eq!(priv_key.len(), 80);
+
+    let cust_key = get_keypair(pub_key, priv_key).unwrap();
+    let host_key1 = X509::from_pem(host_key).unwrap();
+    let host_keys = X509::stack_from_pem(host_keys).unwrap();
+    assert_eq!(host_keys.len(), 2);
+
+    println!("host_key1 = {host_key1:?}");
+    println!("host_keys[0] = {:?}", host_keys[0]);
+    println!("host_keys[1] = {:?}", host_keys[1]);
+
+    (cust_key, host_key1, host_keys[1].clone())
+}
+
 /// TEST ONLY! Get a fixed private/public pair and a fixed public key
 ///
 /// Intended for TESTING only. All parts of the key including the private key are checked in git and
@@ -96,6 +117,15 @@ pub fn get_test_key_and_cert() -> (PKey<Private>, X509) {
 pub fn get_test_keys() -> (PKey<Private>, PKey<Public>) {
     let (cust_key, host) = get_test_key_and_cert();
     (cust_key, host.public_key().unwrap())
+}
+
+pub fn get_test_keys_hybrid() -> (PKey<Private>, PKey<Public>, PKey<Public>) {
+    let (cust_key, host_key_1, host_key_2) = get_test_key_and_cert_hybrid();
+    (
+        cust_key,
+        host_key_1.public_key().unwrap(),
+        host_key_2.public_key().unwrap(),
+    )
 }
 
 fn read_ecdh_pubkey(coords: &[u8]) -> Result<PKey<Public>, ErrorStack> {
