@@ -182,6 +182,7 @@ impl Keyslot {
     }
 
     /// Return the public host key hash size for the given version of the key-slot in bytes
+    #[must_use]
     pub fn phkh_size(&self) -> u32 {
         match self {
             Keyslot::V1(_) => KeyslotV1::PHKH_SIZE,
@@ -190,6 +191,7 @@ impl Keyslot {
     }
 
     /// Return the size of the key-slot in bytes
+    #[must_use]
     pub fn size(&self) -> usize {
         match self {
             Keyslot::V1(_) => KeyslotV1::SIZE,

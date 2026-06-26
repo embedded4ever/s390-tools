@@ -119,6 +119,7 @@ impl SymKeyType {
     }
 
     /// Returns true if the [`SymKeyType`] is an AEAD key
+    #[must_use]
     pub const fn is_aead(&self) -> bool {
         self.tag_len().is_some()
     }
