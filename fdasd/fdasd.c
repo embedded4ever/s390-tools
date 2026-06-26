@@ -387,20 +387,28 @@ static int yes_no(char *question_str)
 	ssize_t bytes_read;
 	char *answer;
 	size_t size;
+	int rc;
 
 	size = 0;
 	answer = NULL;
 	while (1) {
 		printf("%s (y/n): ", question_str);
 		bytes_read = getline(&answer, &size, stdin);
-		if (bytes_read < 0)
-			return -1;
-		if (answer[0] == 'y')
-			return 0;
-		if (answer[0] == 'n')
-			return 1;
+		if (bytes_read < 0) {
+			rc = -1;
+			break;
+		}
+		if (answer[0] == 'y') {
+			rc = 0;
+			break;
+		}
+		if (answer[0] == 'n') {
+			rc = 1;
+			break;
+		}
 	}
 	free(answer);
+	return rc;
 }
 
 static char *fdasd_partition_type(char *dsname)
