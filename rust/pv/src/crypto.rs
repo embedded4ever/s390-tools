@@ -548,9 +548,166 @@ pub(crate) fn verify_signature<T: HasPublic>(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::thread;
+
     use super::*;
     use crate::test_utils::*;
     use crate::{get_test_asset, PvCoreError};
+
+    /// Test that deterministic RNG contexts are thread-local and don't interfere.
+    ///
+    /// Per OpenSSL documentation (RAND_get0_primary(3)):
+    /// "The public and private DRBG are thread-local instances, which are used by
+    /// RAND_bytes() and RAND_priv_bytes(), respectively."
+    ///
+    /// Reference: <https://docs.openssl.org/3.1/man3/RAND_get0_primary/>
+    ///
+    /// Note: RAND_set0_public() and RAND_set0_private() require OpenSSL >= 3.1.
+    #[test]
+    fn test_deterministic_rng_thread_isolation() {
+        use std::sync::Barrier;
+
+        use openssl::rand::rand_bytes;
+
+        // Barriers to synchronize: thread1 installs → thread2 installs → both generate → both
+        // complete
+        let barrier_after_t1_install = Arc::new(Barrier::new(2));
+        let barrier_after_t2_install = Arc::new(Barrier::new(2));
+        let barrier_after_rand_bytes = Arc::new(Barrier::new(2));
+
+        let barrier1_clone = Arc::clone(&barrier_after_t1_install);
+        let barrier2_clone = Arc::clone(&barrier_after_t2_install);
+        let barrier3_clone = Arc::clone(&barrier_after_rand_bytes);
+
+        // Thread 1: Install deterministic RNG with specific entropy
+        let thread1 = thread::spawn(move || {
+            let entropy = [0x42u8; 4096];
+            let nonce = [0x24u8; 48];
+
+            // Install thread-local deterministic RNG
+            let _rng = DeterministicTestRandGuard::install(&entropy, &nonce).unwrap();
+
+            // Signal thread2 that we've installed our RNG
+            barrier1_clone.wait();
+
+            // Wait for thread2 to install its RNG
+            barrier2_clone.wait();
+
+            // Now generate bytes while thread2 also has its RNG installed
+            let mut buf = [0u8; 32];
+            rand_bytes(&mut buf).unwrap();
+
+            // Wait for thread2 to also complete rand_bytes
+            barrier3_clone.wait();
+
+            buf
+        });
+
+        // Thread 2: Install different deterministic RNG after thread1
+        let thread2 = thread::spawn(move || {
+            // Wait for thread1 to install its RNG first
+            barrier_after_t1_install.wait();
+
+            // Now install our own thread-local deterministic RNG with different entropy
+            let entropy = [0xAAu8; 4096];
+            let nonce = [0x55u8; 48];
+            let _rng = DeterministicTestRandGuard::install(&entropy, &nonce).unwrap();
+
+            // Signal thread1 that we've installed our RNG
+            barrier_after_t2_install.wait();
+
+            // Generate bytes with our different entropy (concurrently with thread1)
+            let mut buf = [0u8; 32];
+            rand_bytes(&mut buf).unwrap();
+
+            // Wait for thread1 to also complete rand_bytes
+            barrier_after_rand_bytes.wait();
+
+            buf
+        });
+
+        let t1_buf = thread1.join().unwrap();
+        let t2_buf = thread2.join().unwrap();
+
+        // Expected deterministic values for thread 1 (entropy=0x42, nonce=0x24)
+        let expected_t1: [u8; 32] = [
+            66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66,
+            66, 66, 66, 66, 66, 66, 66, 66, 66, 66,
+        ];
+
+        // Expected deterministic values for thread 2 (entropy=0xAA, nonce=0x55)
+        let expected_t2: [u8; 32] = [
+            170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170,
+            170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170,
+        ];
+
+        // Verify each thread produced its expected deterministic output
+        assert_eq!(
+            t1_buf, expected_t1,
+            "Thread 1 should produce deterministic output"
+        );
+        assert_eq!(
+            t2_buf, expected_t2,
+            "Thread 2 should produce deterministic output"
+        );
+
+        // Also verify they are different (proves thread-local isolation)
+        assert_ne!(
+            t1_buf, t2_buf,
+            "Different thread-local entropy should produce different output"
+        );
+    }
+
+    /// Test that the original RNG is properly restored after DeterministicTestRandGuard is dropped
+    #[test]
+    fn test_deterministic_rng_restoration() {
+        use openssl::rand::rand_bytes;
+
+        // Generate random bytes with system RNG before installing deterministic RNG
+        let mut before_buf = [0u8; 32];
+        rand_bytes(&mut before_buf).unwrap();
+
+        let deterministic_buf = {
+            let entropy = [0x42u8; 4096];
+            let nonce = [0x24u8; 48];
+
+            // Install deterministic RNG
+            let _rng = DeterministicTestRandGuard::install(&entropy, &nonce).unwrap();
+
+            // Generate deterministic bytes
+            let mut buf = [0u8; 32];
+            rand_bytes(&mut buf).unwrap();
+
+            // Expected deterministic output
+            let expected: [u8; 32] = [
+                66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66,
+                66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66,
+            ];
+            assert_eq!(buf, expected, "Should produce deterministic output");
+
+            buf
+            // _rng is dropped here, should restore original RNG
+        };
+
+        // Generate random bytes again with restored system RNG
+        let mut after_buf = [0u8; 32];
+        rand_bytes(&mut after_buf).unwrap();
+
+        // The system RNG should produce different random values each time
+        // (extremely unlikely to match the deterministic output)
+        assert_ne!(
+            after_buf, deterministic_buf,
+            "After restoration, system RNG should produce different random values"
+        );
+
+        // Also verify that before and after are different (system RNG produces random values)
+        // Note: This could theoretically fail with probability 1/2^256, but that's negligible
+        assert_ne!(
+            before_buf, after_buf,
+            "System RNG should produce different random values on each call"
+        );
+    }
 
     #[test]
     fn sign_ec() {
