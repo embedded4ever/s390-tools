@@ -515,6 +515,7 @@ CMDS="${CMDS}\
   :lspci -vvv\
   :lstape\
   :smc_dbg\
+  :zpcimon --module-info --smart-log-raw\
   "
 
 # block device and other scsi device commands (in non alphabetical order)
