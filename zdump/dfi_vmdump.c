@@ -30,6 +30,8 @@
 #include "lib/util_log.h"
 #include "lib/util_libc.h"
 
+#define SYMPTOM_STR_MAX_LEN 1024
+
 static struct {
 	struct vmd_adsr adsr;		/* Dump file symptom record */
 	struct vmd_fmbk fmbk;		/* Dump file map record */
@@ -180,17 +182,21 @@ static void vmdump64big_init(void)
 	zg_read(g.fh, &l.adsr, sizeof(l.adsr), ZG_CHECK);
 
 	if (g.opts.verbose) {
-		u8 buf_asc[1024], buf[1024];
+		u8 buf_asc[SYMPTOM_STR_MAX_LEN], buf[SYMPTOM_STR_MAX_LEN];
+		const u16 sec5_len = MIN(l.adsr.sec5_len, SYMPTOM_STR_MAX_LEN - 1);
 
 		zg_seek(g.fh, l.adsr.sec5_offset, ZG_CHECK);
-		zg_read(g.fh, buf, l.adsr.sec5_len, ZG_CHECK);
-		ebc_2_asc(buf, buf_asc, l.adsr.sec5_len);
-		for (i = 0; i < l.adsr.sec5_len; i++) {
+		zg_read(g.fh, buf, sec5_len, ZG_CHECK);
+		ebc_2_asc(buf, buf_asc, sec5_len);
+		for (i = 0; i < sec5_len; i++) {
 			if (buf_asc[i] == 0 || iscntrl(buf_asc[i]))
 				buf_asc[i] = ' ';
 		}
-		buf_asc[l.adsr.sec5_len] = 0;
-		util_log_print(UTIL_LOG_DEBUG, "Symptom string: %s\n", buf_asc);
+		buf_asc[sec5_len] = 0;
+		if (sec5_len < l.adsr.sec5_len)
+			STDERR("Warning: Symptom string too long, adsr.sec5_len = %#x\n", l.adsr.sec5_len);
+		util_log_print(UTIL_LOG_DEBUG, "Symptom string%s: %s\n",
+			       sec5_len < l.adsr.sec5_len ? "(TRUNCATED)" : "", buf_asc);
 	}
 
 	/* Record 2: fmbk */
