@@ -1051,6 +1051,7 @@ convert() {
 	local pvimg_cmd pv_cmd ble_array b
 
 	# initialize
+	kernel_parameter=""
 	image=${IMAGE}
 	ble=${C_BOOT_LOADER_ENTRY}
 	kernel_parameter_file="${TEMP_DIR}/kernel_parameter"
@@ -1097,6 +1098,9 @@ convert() {
 		kernel_parameter+="$(grep -E "^options" "${f}" | cut -d ' ' -f 2-) ${sel_kernel_parameter}"
 		break
 	done
+	if [[ -z "${kernel_parameter}" ]]; then
+		log_error "No boot loader entry with title \"${ble}\" found"
+	fi
 	if [[ "${NO_EBC}" != "true" ]]; then
 		if [[ $(echo "${kernel_parameter}" | grep "root=LABEL=root") == "" \
 			&& $? == "1" \
