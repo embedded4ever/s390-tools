@@ -713,7 +713,7 @@ static int readdir_entry(struct fst_entry *fst, off_t addr)
  */
 static inline int strip_right(const char *str, int size)
 {
-	while (str[size - 1] == 0x20)
+	while (size > 0 && str[size - 1] == 0x20)
 		size--;
 	return size;
 }
