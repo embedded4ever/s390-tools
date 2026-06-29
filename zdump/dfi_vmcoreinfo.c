@@ -169,13 +169,14 @@ const char *dfi_vmcoreinfo_get(void)
 }
 
 /*
- * Generic function: Return vmcoreinfo item (-1 on failure)
+ * Generic function: Return vmcoreinfo item (-1 on failure).
  */
-static int vmcoreinfo_item(char *buf, int UNUSED(len), const char *fmt,
+static int vmcoreinfo_item(char *buf, size_t len, const char *fmt,
 			   const char *sym)
 {
 
 	char str[1024], *sym_str, *sym_str_end;
+	size_t val_len;
 
 	if (!l.vmcoreinfo)
 		return -1;
@@ -187,12 +188,12 @@ static int vmcoreinfo_item(char *buf, int UNUSED(len), const char *fmt,
 	if (!sym_str)
 		return -1;
 	sym_str += strlen(str);
-	sym_str_end = strchr(sym_str, '\n');
-	if (!sym_str_end)
-		sym_str_end = strchr(sym_str, '\0');
-	memset(str, 0, sizeof(str));
-	memcpy(str, sym_str, (unsigned long) (sym_str_end - sym_str));
-	strcpy(buf, str);
+	sym_str_end = strchrnul(sym_str, '\n');
+	val_len = (size_t)(sym_str_end - sym_str);
+	if (val_len >= len)
+		return -1;
+	memcpy(buf, sym_str, val_len);
+	buf[val_len] = '\0';
 	return 0;
 }
 
@@ -216,7 +217,7 @@ static int vmcoreinfo_item_ulong(unsigned long *val, const char *fmt,
 /*
  * Return vmcoreinfo tag (-1 on failure)
  */
-int dfi_vmcoreinfo_tag(char *str, int len, const char *sym)
+int dfi_vmcoreinfo_tag(char *str, size_t len, const char *sym)
 {
 	return vmcoreinfo_item(str, len, NULL, sym);
 }

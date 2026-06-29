@@ -10,7 +10,7 @@
 
 void dfi_vmcoreinfo_init(void);
 const char *dfi_vmcoreinfo_get(void);
-int dfi_vmcoreinfo_tag(char *str, int len, const char *sym);
+int dfi_vmcoreinfo_tag(char *str, size_t len, const char *sym);
 int dfi_vmcoreinfo_symbol(unsigned long *val, const char *sym);
 int dfi_vmcoreinfo_offset(unsigned long *offs, const char *sym);
 int dfi_vmcoreinfo_size(unsigned long *size, const char *sym);
