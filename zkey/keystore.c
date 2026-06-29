@@ -10,6 +10,7 @@
  */
 
 #include <argz.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <err.h>
 #include <errno.h>
@@ -4598,6 +4599,32 @@ out:
 	return rc;
 }
 
+/**
+ * Check if all characters of the string are within [A-Za-z0-9._/:-], and thus
+ * are safe to be used in generated commands that might get executed.
+ *
+ * @param[in] str       the string to check
+ *
+ * @returns true if the string is valid, false otherwise
+ */
+static bool is_valid_characters_for_command(const char *str)
+{
+	const char *chars = "._/:-";
+	size_t i;
+
+	for (i = 0; i < strlen(str); i++) {
+		if (isalnum(str[i]))
+			continue;
+		if (strchr(chars, str[i]) != NULL)
+			continue;
+
+		warnx("'%s' contains invalid characters", str);
+		return false;
+	}
+
+	return true;
+}
+
 struct crypt_info {
 	bool integrity;
 	bool execute;
@@ -4662,9 +4689,21 @@ static int _keystore_process_cryptsetup(struct keystore *keystore,
 	char *tmpdir;
 	int rc = 0;
 
+	if (!is_valid_characters_for_command(cipher_spec))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(key_file_name))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(volume))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(dmname))
+		return -EINVAL;
+
 	sprintf(temp, "--sector-size %lu ", sector_size);
 
 	if (info->keyfile) {
+		if (!is_valid_characters_for_command(info->keyfile))
+			return -EINVAL;
+
 		util_asprintf(&keyfile_opt, "--key-file '%s' ", info->keyfile);
 		if (info->keyfile_offset > 0)
 			util_asprintf(&offset_opt, "--keyfile-offset %lu ",
@@ -4673,6 +4712,9 @@ static int _keystore_process_cryptsetup(struct keystore *keystore,
 			util_asprintf(&size_opt, "--keyfile-size %lu ",
 				      info->keyfile_size);
 	} else if (passphrase_file != NULL) {
+		if (!is_valid_characters_for_command(passphrase_file))
+			return -EINVAL;
+
 		util_asprintf(&keyfile_opt, "--key-file '%s' ",
 			      passphrase_file);
 	}
@@ -4734,6 +4776,17 @@ static int _keystore_process_cryptsetup(struct keystore *keystore,
 			if (rc != 0)
 				goto out;
 			if (find_info.found) {
+				if (!is_valid_characters_for_command(
+						find_info.integrity_spec)) {
+					rc = -EINVAL;
+					goto out;
+				}
+				if (!is_valid_characters_for_command(
+						find_info.integrity_key_name)) {
+					rc = -EINVAL;
+					goto out;
+				}
+
 				util_asprintf(&integrity_opts,
 					      "--integrity %s "
 					      "--integrity-key-size %lu ",
@@ -4754,6 +4807,12 @@ static int _keystore_process_cryptsetup(struct keystore *keystore,
 					      "%s/luks2-integrity-%s.skey",
 					      tmpdir != NULL ? tmpdir : "/tmp",
 					      dmname);
+
+				if (!is_valid_characters_for_command(
+							combined_key)) {
+					rc = -EINVAL;
+					goto out;
+				}
 
 				util_asprintf(&cmd, "cat '%s' '%s' > '%s'",
 					      key_file_name,
@@ -4888,6 +4947,15 @@ static int _keystore_process_crypttab(struct keystore *UNUSED(keystore),
 {
 	char temp[1000];
 
+	if (!is_valid_characters_for_command(cipher_spec))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(key_file_name))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(volume))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(dmname))
+		return -EINVAL;
+
 	if (strcasecmp(volume_type, VOLUME_TYPE_PLAIN) == 0) {
 		sprintf(temp, ",sector-size=%lu", sector_size);
 		printf("%s\t%s\t%s\tplain,cipher=%s,size=%lu%s\n",
@@ -4895,6 +4963,9 @@ static int _keystore_process_crypttab(struct keystore *UNUSED(keystore),
 		       key_file_size * 8, sector_size > 0 ? temp : "");
 	} else if (strcasecmp(volume_type, VOLUME_TYPE_LUKS2) == 0) {
 		if (info->keyfile != NULL) {
+			if (!is_valid_characters_for_command(info->keyfile))
+				return -EINVAL;
+
 			printf("%s\t%s\t%s\tluks", dmname, volume,
 			       info->keyfile);
 			if (info->keyfile_offset > 0)
@@ -4903,6 +4974,9 @@ static int _keystore_process_crypttab(struct keystore *UNUSED(keystore),
 			if (info->keyfile_size > 0)
 				printf(",keyfile-size=%lu", info->keyfile_size);
 		} else if (passphrase_file != NULL) {
+			if (!is_valid_characters_for_command(passphrase_file))
+				return -EINVAL;
+
 			printf("%s\t%s\t%s\tluks", dmname, volume,
 			       passphrase_file);
 		} else {
@@ -4954,6 +5028,15 @@ static int _keystore_process_integritysetup(struct keystore *keystore,
 		return 0;
 
 	sprintf(temp, "--sector-size %lu ", sector_size);
+
+	if (!is_valid_characters_for_command(cipher_spec))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(key_file_name))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(volume))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(dmname))
+		return -EINVAL;
 
 	util_asprintf(&cmd,
 		      "integritysetup %s %s%s--integrity %s "
@@ -5009,6 +5092,15 @@ static int _keystore_process_integritytab(struct keystore *UNUSED(keystore),
 {
 	if (strcasecmp(volume_type, VOLUME_TYPE_INTEGRITY) != 0)
 		return 0;
+
+	if (!is_valid_characters_for_command(cipher_spec))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(key_file_name))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(volume))
+		return -EINVAL;
+	if (!is_valid_characters_for_command(dmname))
+		return -EINVAL;
 
 	printf("%s\t%s\t%s\tintegrity-algorithm=%s\n", volume, dmname,
 	       key_file_name, cipher_spec);
