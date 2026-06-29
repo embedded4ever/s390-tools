@@ -1476,6 +1476,7 @@ static int pkey_kblob2protk(int pkey_fd, u8 *key, size_t key_size,
 	u32 list_entries = 0, pkeylen = 0, type;
 	struct pkey_kblob2pkey3 kblob2pkey3;
 	struct pkey_apqn *list = NULL;
+	int retry_count = 0;
 	bool securekey, xts;
 	u32 flags = 0;
 	int rc;
@@ -1509,6 +1510,7 @@ static int pkey_kblob2protk(int pkey_fd, u8 *key, size_t key_size,
 		}
 	}
 
+retry1:
 	kblob2pkey3.key = key;
 	kblob2pkey3.keylen = HALF_KEYSIZE_FOR_XTS(key_size, xts);
 	kblob2pkey3.apqns = list;
@@ -1522,6 +1524,20 @@ static int pkey_kblob2protk(int pkey_fd, u8 *key, size_t key_size,
 		rc = -errno;
 		pr_verbose(verbose, "ioctl PKEY_KBLOB2PROTK3 rc: %s",
 			   strerror(-rc));
+
+		/*
+		 * After a master key change, it can happen that the
+		 * PKEY_KBLOB2PROTK3 ioctl returns EBUSY. This is a temporary
+		 * situation and the operation will succeed, once the firmware
+		 * has completed some internal processing related with the
+		 * master key change. Delay 1 second and retry up to 10 times.
+		 */
+		if (rc == -EBUSY && retry_count < 10) {
+			pr_verbose(verbose, "Retrying after 1 second...");
+			retry_count++;
+			sleep(1);
+			goto retry1;
+		}
 		goto out;
 	}
 
@@ -1535,6 +1551,7 @@ static int pkey_kblob2protk(int pkey_fd, u8 *key, size_t key_size,
 			goto out;
 		}
 
+retry2:
 		kblob2pkey3.key = key + key_size / 2;
 		kblob2pkey3.keylen = key_size / 2;
 		kblob2pkey3.apqns = list;
@@ -1548,6 +1565,22 @@ static int pkey_kblob2protk(int pkey_fd, u8 *key, size_t key_size,
 			rc = -errno;
 			pr_verbose(verbose, "ioctl PKEY_KBLOB2PROTK3 rc: %s",
 				   strerror(-rc));
+
+			/*
+			 * After a master key change, it can happen that the
+			 * PKEY_KBLOB2PROTK3 ioctl returns EBUSY. This is a
+			 * temporary situation and the operation will succeed,
+			 * once the firmware has completed some internal
+			 * processing related with the  master key change.
+			 * Delay 1 second and retry up to 10 times.
+			 */
+			if (rc == -EBUSY && retry_count < 10) {
+				pr_verbose(verbose,
+					   "Retrying after 1 second...");
+				retry_count++;
+				sleep(1);
+				goto retry2;
+			}
 			goto out;
 		}
 
