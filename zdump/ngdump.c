@@ -18,6 +18,8 @@
 #include <unistd.h>
 #include <sys/mount.h>
 
+#include <openssl/evp.h>
+
 #include "lib/dasd_base.h"
 #include "lib/util_libc.h"
 #include "lib/util_part.h"
@@ -96,35 +98,84 @@ static int read_meta_from_file(const char *filename, struct ngdump_meta *meta)
 
 static int calc_sha256sum(const char *filename, char **cksum)
 {
+	const unsigned long buflen = PAGE_SIZE;
+	const EVP_MD *digtype = EVP_sha256();
+	const size_t diglen = EVP_MD_size(digtype);
+	unsigned char *digest;
+	EVP_MD_CTX *ctx = NULL;
+	size_t i;
 	FILE *fp = NULL;
-	char *cmd = NULL;
-	char *line = NULL;
+	int n, rc;
+	void *buf;
 
-	*cksum = NULL;
+	buf = util_malloc(buflen);
+	digest = util_malloc(diglen);
 
-	util_asprintf(&cmd, "sha256sum %s", filename);
-
-	fp = popen(cmd, "r");
-	free(cmd);
-	if (!fp)
-		return -1;
-
-	while (fscanf(fp, "%m[^\n]\n", &line) == 1) {
-		int n = sscanf(line, "%m[^ ]", cksum);
-
-		free(line);
-		line = NULL;
-
-		if (n == 1)
-			break;
-
-		free(*cksum);
-		*cksum = NULL;
+	fp = fopen(filename, "r");
+	if (!fp) {
+		util_log_print(UTIL_LOG_ERROR,
+			       "%s: Could not open \"%s\" (%s)\n",
+			       __func__, filename, strerror(errno));
+		rc = -1;
+		goto out;
 	}
 
-	pclose(fp);
+	ctx = EVP_MD_CTX_new();
+	if (!ctx) {
+		rc = -1;
+		goto out;
+	}
 
-	return 0;
+	rc = EVP_DigestInit_ex(ctx, digtype, NULL);
+	if (!rc) {
+		rc = -1;
+		goto out;
+	}
+
+	while (!feof(fp)) {
+		n = fread(buf, 1, buflen, fp);
+		if (ferror(fp)) {
+			util_log_print(UTIL_LOG_ERROR,
+			       "%s: Could not read file \"%s\" (%s)\n",
+			       __func__, filename, strerror(errno));
+			rc = -1;
+			goto out;
+		}
+
+		rc = EVP_DigestUpdate(ctx, buf, n);
+		if (!rc) {
+			rc = -1;
+			goto out;
+		}
+	}
+
+	rc = EVP_DigestFinal(ctx, digest, NULL);
+	if (!rc) {
+		rc = -1;
+		goto out;
+	}
+
+	/* Two characters for each digest byte and
+	   additional one for string terminator */
+	*cksum = util_malloc(diglen * 2 + 1);
+
+	for (i = 0; i < diglen; i++)
+		sprintf(*cksum + 2 * i, "%02x", digest[i]);
+
+	util_log_print(UTIL_LOG_DEBUG,
+		       "%s: Dump checksum %s\n",
+		       __func__, *cksum);
+
+	rc = 0;
+
+out:
+	free(digest);
+	free(buf);
+	if (fp)
+		fclose(fp);
+	if (ctx)
+		EVP_MD_CTX_free(ctx);
+	return rc;
 }
 
 static int check_sha256sum(const char *filename, const char *expected_cksum)
