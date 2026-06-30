@@ -564,6 +564,11 @@ static const void *sk_cca_get_pka_section(const unsigned char *key_token,
 	section_hdr = (struct cca_section_header *)&key_token[ofs];
 
 	while (section_hdr->section_identifier != section_id) {
+		if (section_hdr->section_length <
+					sizeof(struct cca_section_header))  {
+			sk_debug(debug, "ERROR: invalid section length");
+			return NULL;
+		}
 		ofs += section_hdr->section_length;
 		if (ofs >= token_hdr->token_length) {
 			sk_debug(debug, "ERROR: section %u not found",
