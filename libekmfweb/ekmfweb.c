@@ -2220,6 +2220,11 @@ static int _ekmf_import_key(unsigned char *req_sess_key,
 	unsigned char *party_info = NULL;
 	int rc;
 
+	if (resp_party_info_length > SIZE_MAX - req_party_info_length) {
+		rc = -EINVAL;
+		goto out;
+	}
+
 	party_info_length = req_party_info_length + resp_party_info_length;
 	party_info = malloc(party_info_length);
 	if (party_info == NULL) {
