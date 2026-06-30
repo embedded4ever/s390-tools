@@ -84,4 +84,6 @@ char *read_passphrase_as_base64(const char *filename, bool verbose);
 int store_passphrase_from_base64(const char *hex_string, const char *filename,
 				 bool verbose);
 
+FILE *fopen_nofollow(const char *path, const char *mode);
+
 #endif

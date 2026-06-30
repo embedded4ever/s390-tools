@@ -382,7 +382,7 @@ static int _save_kms_properties(const struct keystore *keystore,
 				struct properties *kms_props, bool verbose)
 {
 	char *filename = NULL;
-	int rc;
+	int fd = -1, rc = 0;
 
 	util_assert(keystore != NULL, "Internal error: keystore is NULL");
 	util_assert(kms_props != NULL, "Internal error: kms_props is NULL");
@@ -398,19 +398,28 @@ static int _save_kms_properties(const struct keystore *keystore,
 		goto out;
 	}
 
-	if (chmod(filename, keystore->mode) != 0) {
+	fd = open(filename, O_RDONLY | O_NOFOLLOW);
+	if (fd < 0) {
+		rc = -errno;
+		warnx("Failed to open '%s': %s", filename, strerror(-rc));
+		return rc;
+	}
+
+	if (fchmod(fd, keystore->mode) != 0) {
 		rc = -errno;
 		warnx("chmod failed on file '%s': %s", filename, strerror(-rc));
-		return rc;
+		goto out;
 	}
 
-	if (chown(filename, geteuid(), keystore->owner) != 0) {
+	if (fchown(fd, geteuid(), keystore->owner) != 0) {
 		rc = -errno;
 		warnx("chown failed on file '%s': %s", filename, strerror(-rc));
-		return rc;
+		goto out;
 	}
-
 out:
+
+	if (fd >= 0)
+		close(fd);
 	if (filename != NULL)
 		free(filename);
 
@@ -609,7 +618,7 @@ int bind_kms_plugin(struct keystore *keystore, const char *plugin,
 	char *plugin_name = NULL;
 	void *plugin_lib = NULL;
 	bool created = false;
-	int rc;
+	int rc, fd;
 
 	util_assert(keystore != NULL, "Internal error: keystore is NULL");
 	util_assert(plugin != NULL, "Internal error: plugin is NULL");
@@ -649,19 +658,30 @@ int bind_kms_plugin(struct keystore *keystore, const char *plugin,
 	}
 	created = true;
 
-	if (chmod(config_dir, keystore->mode) != 0) {
+	fd = open(config_dir, O_RDONLY | O_NOFOLLOW);
+	if (fd < 0) {
+		rc = -errno;
+		warnx("Failed to open '%s': %s", config_dir, strerror(-rc));
+		goto out;
+	}
+
+	if (fchmod(fd, keystore->mode) != 0) {
 		rc = -errno;
 		warnx("chmod failed on directory '%s': %s", config_dir,
 		      strerror(-rc));
-		return rc;
+		close(fd);
+		goto out;
 	}
 
-	if (chown(config_dir, geteuid(), keystore->owner) != 0) {
+	if (fchown(fd, geteuid(), keystore->owner) != 0) {
 		rc = -errno;
 		warnx("chown failed on directory '%s': %s", config_dir,
 		      strerror(-rc));
-		return rc;
+		close(fd);
+		goto out;
 	}
+
+	close(fd);
 
 	if (funcs->kms_bind != NULL) {
 		rc = funcs->kms_bind(config_dir);

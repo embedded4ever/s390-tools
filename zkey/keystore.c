@@ -259,21 +259,30 @@ static void _keystore_free_key_filenames(struct key_filenames *names)
 static int _keystore_set_file_permission(struct keystore *keystore,
 					 const char *filename)
 {
-	int rc;
+	int fd, rc = 0;
 
-	if (chmod(filename, keystore->mode) != 0) {
+	fd = open(filename, O_RDONLY | O_NOFOLLOW);
+	if (fd < 0) {
+		rc = -errno;
+		warnx("Failed to open '%s': %s", filename, strerror(-rc));
+		return rc;
+	}
+
+	if (fchmod(fd, keystore->mode) != 0) {
 		rc = -errno;
 		warnx("chmod failed on file '%s': %s", filename, strerror(-rc));
-		return rc;
+		goto out;
 	}
 
-	if (chown(filename, geteuid(), keystore->owner) != 0) {
+	if (fchown(fd, geteuid(), keystore->owner) != 0) {
 		rc = -errno;
 		warnx("chown failed on file '%s': %s", filename, strerror(-rc));
-		return rc;
+		goto out;
 	}
 
-	return 0;
+out:
+	close(fd);
+	return rc;
 }
 
 /**
@@ -1476,8 +1485,8 @@ static int _keystore_lock_repository(struct keystore *keystore)
 	util_asprintf(&lock_file_name, "%s/%s", keystore->directory,
 		      LOCK_FILE_NAME);
 
-	if (stat(lock_file_name, &sb) == 0) {
-		keystore->lock_fd = open(lock_file_name, O_RDONLY);
+	if (lstat(lock_file_name, &sb) == 0) {
+		keystore->lock_fd = open(lock_file_name, O_RDONLY | O_NOFOLLOW);
 		if (keystore->lock_fd == -1) {
 			rc = -errno;
 			warnx("Failed to open lock file '%s': %s",
@@ -1486,7 +1495,8 @@ static int _keystore_lock_repository(struct keystore *keystore)
 			goto out;
 		}
 	} else {
-		keystore->lock_fd = open(lock_file_name, O_CREAT | O_RDONLY,
+		keystore->lock_fd = open(lock_file_name,
+					 O_CREAT | O_RDONLY | O_NOFOLLOW,
 					 keystore->mode);
 		if (keystore->lock_fd == -1) {
 			rc = -errno;
@@ -1561,7 +1571,7 @@ struct keystore *keystore_new(const char *directory,
 
 	util_assert(directory != NULL, "Internal error: directory is NULL");
 
-	if (stat(directory, &sb) != 0) {
+	if (lstat(directory, &sb) != 0) {
 		warnx("Can not access '%s': %s", directory, strerror(errno));
 		return NULL;
 	}

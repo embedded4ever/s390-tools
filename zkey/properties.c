@@ -22,6 +22,7 @@
 #include "lib/util_panic.h"
 
 #include "properties.h"
+#include "utils.h"
 
 struct properties {
 	struct util_list list;
@@ -312,7 +313,7 @@ int properties_save(struct properties *properties, const char *filename,
 	util_assert(properties != NULL, "Internal error: properties is NULL");
 	util_assert(filename != NULL, "Internal error: filename is NULL");
 
-	fp = fopen(filename, "w");
+	fp = fopen_nofollow(filename, "w");
 	if (fp == NULL)
 		return -EIO;
 

@@ -150,7 +150,7 @@ int write_secure_key(const char *keyfile, const u8 *secure_key,
 	util_assert(secure_key_size > 0,
 		    "Internal error: secure_key_size is zero");
 
-	fp = fopen(keyfile, "w");
+	fp = fopen_nofollow(keyfile, "w");
 	if (fp == NULL) {
 		warnx("File '%s': %s", keyfile, strerror(errno));
 		return -EIO;

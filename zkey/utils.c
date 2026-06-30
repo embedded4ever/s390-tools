@@ -1225,7 +1225,7 @@ int copy_file(const char *in_file_name, const char *out_file_name,
 		goto out;
 	}
 
-	fp_out = fopen(out_file_name, "w");
+	fp_out = fopen_nofollow(out_file_name, "w");
 	if (fp_out == NULL) {
 		rc = -errno;
 		warnx("Failed to open '%s': %s", out_file_name, strerror(-rc));
@@ -1366,7 +1366,7 @@ int store_passphrase_from_base64(const char *b64_string, const char *filename,
 		return -ENOMEM;
 	}
 
-	fp = fopen(filename, "w");
+	fp = fopen_nofollow(filename, "w");
 	if (fp == NULL) {
 		pr_verbose(verbose, "Open of file '%s' failed: %s", filename,
 			   strerror(errno));
@@ -1393,3 +1393,32 @@ out:
 	return rc;
 }
 
+FILE *fopen_nofollow(const char *path, const char *mode)
+{
+	int flags = O_NOFOLLOW;
+	int fd;
+	FILE *fp;
+
+	/* Determine flags based on mode */
+	if (mode[0] == 'r')
+		flags |= (mode[1] == '+') ? O_RDWR : O_RDONLY;
+	else if (mode[0] == 'w')
+		flags |= O_CREAT | O_TRUNC |
+				((mode[1] == '+') ? O_RDWR : O_WRONLY);
+	else if (mode[0] == 'a')
+		flags |= O_CREAT | O_APPEND |
+				((mode[1] == '+') ? O_RDWR : O_WRONLY);
+	else
+		return NULL;
+
+	fd = open(path, flags, 0600);
+	if (fd < 0)
+		return NULL;
+
+	fp = fdopen(fd, mode);
+	if (fp == NULL) {
+		close(fd);
+		return NULL;
+	}
+	return fp;
+}

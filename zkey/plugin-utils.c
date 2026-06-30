@@ -73,7 +73,7 @@ int plugin_init(struct plugin_data *pd, const char *plugin_name,
 
 	pr_verbose(pd, "Plugin initializing, config_path: '%s'", config_path);
 
-	if (stat(config_path, &sb) != 0) {
+	if (lstat(config_path, &sb) != 0) {
 		rc = -errno;
 		warnx("Can not access '%s': %s", config_path, strerror(-rc));
 		goto error;
@@ -231,23 +231,33 @@ out:
  */
 int plugin_set_file_permission(struct plugin_data *pd, const char *filename)
 {
-	int rc;
+	int fd, rc = 0;
 
-	if (chmod(filename, pd->config_path_mode) != 0) {
+	fd = open(filename, O_RDONLY | O_NOFOLLOW);
+	if (fd < 0) {
+		rc = -errno;
+		plugin_set_error(pd, "Failed to open '%s': %s", filename,
+				 strerror(-rc));
+		return rc;
+	}
+
+	if (fchmod(fd, pd->config_path_mode) != 0) {
 		rc = -errno;
 		plugin_set_error(pd, "chmod failed on file '%s': %s", filename,
 				 strerror(-rc));
-		return rc;
+		goto out;
 	}
 
-	if (chown(filename, geteuid(), pd->config_path_owner) != 0) {
+	if (fchown(fd, geteuid(), pd->config_path_owner) != 0) {
 		rc = -errno;
 		plugin_set_error(pd, "chown failed on file '%s': %s", filename,
 				 strerror(-rc));
-		return rc;
+		goto out;
 	}
 
-	return 0;
+out:
+	close(fd);
+	return rc;
 }
 
 /**
