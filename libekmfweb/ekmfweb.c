@@ -233,7 +233,7 @@ static int _ekmf_extract_pubkey(const char *cert, const char *pub_key_pem,
 		goto out;
 	}
 
-	fp = fopen(pub_key_pem, "w");
+	fp = fopen_nofollow(pub_key_pem, "w");
 	if (fp == NULL) {
 		rc = -errno;
 		pr_verbose(verbose, "File '%s': %s", pub_key_pem,
@@ -458,7 +458,7 @@ retry:
 			 out);
 
 	if (server_cert_pem != NULL) {
-		fp = fopen(server_cert_pem, "w");
+		fp = fopen_nofollow(server_cert_pem, "w");
 		if (fp == NULL) {
 			rc = -errno;
 			pr_verbose(verbose, "File '%s': %s", server_cert_pem,
@@ -495,7 +495,7 @@ retry:
 			 */
 			if (ci->num_of_certs > 1 && ca_bundle_pem != NULL &&
 			    do_verify == 0) {
-				fp = fopen(ca_bundle_pem, "w");
+				fp = fopen_nofollow(ca_bundle_pem, "w");
 				if (fp == NULL) {
 					rc = -errno;
 					pr_verbose(verbose, "File '%s': %s",
@@ -1415,7 +1415,7 @@ int ekmf_login(const struct ekmf_config *config, CURL **curl_handle,
 	while (*tok == ' ')
 		tok++;
 
-	fp = fopen(config->login_token, "w");
+	fp = fopen_nofollow(config->login_token, "w");
 	if (fp == NULL) {
 		rc = -errno;
 		pr_verbose(verbose, "Failed to open file %s: '%s'",

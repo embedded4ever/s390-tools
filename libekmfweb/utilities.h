@@ -124,4 +124,6 @@ int json_object_object_add_ex(struct json_object *obj, const char *const key,
 			      const unsigned int opts);
 #endif
 
+FILE *fopen_nofollow(const char *path, const char *mode);
+
 #endif
