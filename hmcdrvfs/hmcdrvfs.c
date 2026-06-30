@@ -514,7 +514,7 @@ static int hmcdrv_path_copy(struct hmcdrv_fuse_file *fp, char *dest)
 	char *src = HMCDRV_FUSE_PATH(fp);
 	int len = 0;
 
-	while ((len < (HMCDRV_FUSE_MAXPATH - 1)) &&
+	while ((len < (HMCDRV_FUSE_MAXPATH - 2)) &&
 	       (*src != '\0')) {
 
 		*dest = *src;
