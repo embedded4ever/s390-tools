@@ -698,6 +698,7 @@ static int sk_pkey_meth_setup_pkey(EVP_PKEY *pkey,
 	struct sk_pkey_data *data;
 	EC_KEY *ec;
 	RSA *rsa;
+	int rc;
 
 	if (pkey == NULL || secure_key == NULL || secure_key_size == 0 ||
 	    funcs == NULL)
@@ -733,12 +734,14 @@ static int sk_pkey_meth_setup_pkey(EVP_PKEY *pkey,
 		ec = EVP_PKEY_get0_EC_KEY(pkey);
 		if (ec == NULL) {
 			sk_debug(debug, "EVP_PKEY_get0_EC_KEY failed");
-			return -EIO;
+			rc = -EIO;
+			goto error;
 		}
 
 		if (!EC_KEY_set_ex_data(ec, sk_pkey_data_ec_index, data)) {
 			sk_debug(debug, "EC_KEY_set_ex_data failed");
-			return -EIO;
+			rc = -EIO;
+			goto error;
 		}
 		break;
 	case EVP_PKEY_RSA:
@@ -746,17 +749,29 @@ static int sk_pkey_meth_setup_pkey(EVP_PKEY *pkey,
 		rsa = EVP_PKEY_get0_RSA(pkey);
 		if (rsa == NULL) {
 			sk_debug(debug, "EVP_PKEY_get0_RSA failed");
-			return -EIO;
+			rc = -EIO;
+			goto error;
 		}
 
 		if (!RSA_set_ex_data(rsa, sk_pkey_data_rsa_index, data)) {
 			sk_debug(debug, "RSA_set_ex_data failed");
-			return -EIO;
+			rc = -EIO;
+			goto error;
 		}
 		break;
+	default:
+		rc = -EIO;
+		goto error;
 	}
 
 	return 0;
+
+error:
+	if (data != NULL) {
+		OPENSSL_free(data->key_blob);
+		OPENSSL_free(data);
+	}
+	return rc;
 }
 
 /**
