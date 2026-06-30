@@ -1739,7 +1739,7 @@ int ekmf_get_settings(const struct ekmf_config *config, CURL **curl_handle,
 	if (xts_key2_template != NULL) {
 		*xts_key2_template = _ekmf_find_setting(response_obj,
 					SETTING_ID_XTS_KEY2_TEMPLATE, verbose);
-		if (*identity_template == NULL) {
+		if (*xts_key2_template  == NULL) {
 			if (error_msg != NULL) {
 				if (asprintf(error_msg, "The EKMF Web setting "
 					     "'XTS Key Template Name (Key 2)' "
@@ -1882,8 +1882,9 @@ int ekmf_check_feature(const struct ekmf_config *config, CURL **curl_handle,
 		pr_verbose(verbose, "Feature '%s' is not installed",
 			   FEATURE_ID_PERVASIVE_ENCRYPTION);
 		rc = -ENOTSUP;
-		if (asprintf(error_msg, "EKMF Web feature "
-			     "'Pervasive Encryption' is not installed.")) {
+		if (error_msg != NULL &&
+		    asprintf(error_msg, "EKMF Web feature "
+			     "'Pervasive Encryption' is not installed.") < 0) {
 			pr_verbose(verbose, "asprintf failed");
 			rc = -ENOMEM;
 		}
@@ -1925,7 +1926,7 @@ static int _ekmf_build_party_info(const char *key_uuid, const char *timestamp,
 
 	if (*party_info_length < (size_t)EVP_MD_size(md)) {
 		pr_verbose(verbose, "Party info buffer is too small");
-		return -ERANGE;
+		rc = -ERANGE;
 		goto out;
 	}
 
@@ -4596,7 +4597,7 @@ static int _ekmf_build_key_material(const unsigned char *certificate,
 			 "JSON object", verbose, out);
 
 	payload = _ekmf_base64_encode(certificate, certificate_size);
-	JSON_CHECK_ERROR(*keymat_obj == NULL, rc, -EIO,
+	JSON_CHECK_ERROR(payload == NULL, rc, -EIO,
 			 "Failed to base64 encode the certificate",
 			 verbose, out);
 

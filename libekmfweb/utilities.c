@@ -1037,7 +1037,7 @@ int clone_tag_def_list(const struct ekmf_tag_def_list *src,
 		if (src->tag_defs[i].description != NULL) {
 			dest->tag_defs[i].description =
 					strdup(src->tag_defs[i].description);
-			if (dest->tag_defs[i].description != NULL) {
+			if (dest->tag_defs[i].description == NULL) {
 				rc = -ENOMEM;
 				goto out;
 			}
