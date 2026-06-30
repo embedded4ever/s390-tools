@@ -106,7 +106,7 @@ int decode_base64url(unsigned char *output, size_t *outlen,
 
 	len = EVP_DecodeBlock((unsigned char *)padded_output,
 			      (unsigned char *)padded_input, padded_inlen);
-	if (len != (int)padded_inlen * 3 / 4) {
+	if ((size_t)len != padded_inlen * 3 / 4) {
 		rc = -EIO;
 		goto out;
 	}

@@ -4548,8 +4548,9 @@ out:
  */
 static char *_ekmf_base64_encode(const unsigned char *data, size_t data_size)
 {
-	int outlen, len;
+	size_t outlen;
 	char *out;
+	int len;
 
 	outlen = (data_size / 3) * 4;
 	if (data_size % 3 > 0)
@@ -4560,7 +4561,7 @@ static char *_ekmf_base64_encode(const unsigned char *data, size_t data_size)
 		return NULL;
 
 	len = EVP_EncodeBlock((unsigned char *)out, data, data_size);
-	if (len != outlen) {
+	if (len < 0 || (size_t)len != outlen) {
 		free(out);
 		return NULL;
 	}
