@@ -504,6 +504,8 @@ static int sk_ep11_parse_spki(const unsigned char *spki, size_t spki_len,
 				    pub_key, pub_key_len);
 	if (tag != 0x03) /* BITSTRING */
 		return -EINVAL;
+	if (*pub_key_len == 0)
+		return -EINVAL;
 
 	/* skip unsused-bits byte */
 	(*pub_key)++;
