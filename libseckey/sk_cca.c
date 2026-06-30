@@ -1394,7 +1394,7 @@ static int sk_cca_get_public_from_rsa_key(const unsigned char *key_token,
 		return -EINVAL;
 	}
 	if (rsa_pub_section->section_header.section_length <
-				sizeof(struct cca_ec_pub_key_section)) {
+				sizeof(struct cca_rsa_pub_key_section)) {
 		sk_debug(debug, "ERROR: invalid RSA public key section length");
 		return -EINVAL;
 	}
