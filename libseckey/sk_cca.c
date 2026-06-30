@@ -463,7 +463,7 @@ int SK_CCA_generate_rsa_key_pair(const struct sk_ext_cca_lib *cca_lib,
 	case 257:
 		key_value_structure.public_exp_length = 2;
 		key_value_structure.public_exponent[0] = 0x01;
-		key_value_structure.public_exponent[0] = 0x01;
+		key_value_structure.public_exponent[1] = 0x01;
 		break;
 	case 65537:
 		key_value_structure.public_exp_length = 3;
