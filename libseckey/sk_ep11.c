@@ -561,7 +561,7 @@ int SK_EP11_get_key_type(const unsigned char *key_token,
 		return -EINVAL;
 
 	spki_size = key_token_length - hdr->len;
-	if (spki_size <= 0)
+	if (spki_size == 0)
 		return -EINVAL;
 
 	rc = sk_ep11_parse_spki(key_token + hdr->len, spki_size,
@@ -1381,7 +1381,7 @@ int SK_EP11_get_public_from_secure_key(const unsigned char *key_token,
 		return -EINVAL;
 
 	spki_size = key_token_length - hdr->len;
-	if (spki_size <= 0)
+	if (spki_size == 0)
 		return -EINVAL;
 
 	rc = sk_ep11_parse_spki(key_token + hdr->len, spki_size,
