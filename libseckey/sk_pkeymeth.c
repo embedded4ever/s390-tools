@@ -796,13 +796,13 @@ int SK_OPENSSL_init(bool debug)
 		return -EIO;
 	}
 	sk_pkey_meth_default_method_rsa = EVP_PKEY_meth_find(EVP_PKEY_RSA);
-	if (sk_pkey_meth_default_method_ec == NULL) {
+	if (sk_pkey_meth_default_method_rsa == NULL) {
 		sk_debug(debug, "ERROR: EVP_PKEY_meth_find(RSA) failed");
 	return -EIO;
 	}
 	sk_pkey_meth_default_method_rsa_pss =
 					EVP_PKEY_meth_find(EVP_PKEY_RSA_PSS);
-	if (sk_pkey_meth_default_method_ec == NULL) {
+	if (sk_pkey_meth_default_method_rsa_pss == NULL) {
 		sk_debug(debug, "ERROR: EVP_PKEY_meth_find(RSA-PSS) failed");
 		return -EIO;
 	}
