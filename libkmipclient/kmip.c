@@ -258,7 +258,7 @@ int kmip_node_add_structure_elements(struct kmip_node *node,
  *
  * @param node              the KMIP node
  *
- * @returns the number of elements, or -1 if  the node is not of type structure
+ * @returns the number of elements, or 0 if  the node is not of type structure
  */
 unsigned int kmip_node_get_structure_element_count(const struct kmip_node *node)
 {
@@ -266,10 +266,10 @@ unsigned int kmip_node_get_structure_element_count(const struct kmip_node *node)
 	unsigned int i;
 
 	if (node == NULL)
-		return -1;
+		return 0;
 
 	if (node->type != KMIP_TYPE_STRUCTURE)
-		return -1;
+		return 0;
 
 	element = node->structure_value;
 	for (i = 0; element != NULL; i++)
@@ -319,7 +319,7 @@ struct kmip_node *kmip_node_get_structure_element_by_index(
  * @param node              the KMIP node
  * @param tag               the tag to find
  *
- * @returns the number of elements, or -1 if  the node is not of type structure
+ * @returns the number of elements, or 0 if  the node is not of type structure
  */
 unsigned int kmip_node_get_structure_element_by_tag_count(
 					const struct kmip_node *node,
@@ -329,10 +329,10 @@ unsigned int kmip_node_get_structure_element_by_tag_count(
 	unsigned int i;
 
 	if (node == NULL)
-		return -1;
+		return 0;
 
 	if (node->type != KMIP_TYPE_STRUCTURE)
-		return -1;
+		return 0;
 
 	element = node->structure_value;
 	for (i = 0; element != NULL; element = element->next) {
