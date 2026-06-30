@@ -366,9 +366,9 @@ out:
 		*payload_obj = pld;
 	else
 		json_object_put(pld);
-	if (signature != NULL && rc != 0) {
-		free(signature);
-		signature = NULL;
+	if (signature != NULL && *signature != NULL && rc != 0) {
+		free(*signature);
+		*signature = NULL;
 		*signature_len = 0;
 	}
 	if (json != NULL)
