@@ -417,6 +417,8 @@ static unsigned char sk_ep11_parse_der_tag(const unsigned char *data,
 		if (num > sizeof(size_t))
 			return 0;
 		*value_len = data[2];
+		if (data_len < 2 + num)
+			return 0;
 		for (i = 1; i < num; i++) {
 			*value_len <<= 8;
 			*value_len |= data[2 + i];
