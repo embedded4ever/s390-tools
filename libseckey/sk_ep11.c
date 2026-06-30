@@ -708,7 +708,7 @@ static int sk_ep11_rsa_sign(const unsigned char *key_token,
 	case RSA_X931_PADDING:
 		mech.mechanism = CKM_RSA_X9_31;
 
-		if ((hdr->flags && PKEY_TYPE_EP11_FLAG_X9_31) == 0) {
+		if ((hdr->flags & PKEY_TYPE_EP11_FLAG_X9_31) == 0) {
 			sk_debug(debug, "ERROR: no RSA X9.31 key");
 			return -EINVAL;
 		}
