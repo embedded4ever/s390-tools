@@ -10,10 +10,12 @@
 #include <string.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #include <openssl/evp.h>
 #include <openssl/sha.h>
@@ -811,6 +813,35 @@ out:
 	return rc;
 }
 
+static inline FILE *fopen_nofollow(const char *path, const char *mode)
+{
+	int flags = O_NOFOLLOW;
+	int fd;
+	FILE *fp;
+
+	/* Determine flags based on mode */
+	if (mode[0] == 'r')
+		flags |= (mode[1] == '+') ? O_RDWR : O_RDONLY;
+	else if (mode[0] == 'w')
+		flags |= O_CREAT | O_TRUNC |
+				((mode[1] == '+') ? O_RDWR : O_WRONLY);
+	else if (mode[0] == 'a')
+		flags |= O_CREAT | O_APPEND |
+				((mode[1] == '+') ? O_RDWR : O_WRONLY);
+	else
+		return NULL;
+
+	fd = open(path, flags, 0600);
+	if (fd < 0)
+		return NULL;
+
+	fp = fdopen(fd, mode);
+	if (fp == NULL) {
+		close(fd);
+		return NULL;
+	}
+	return fp;
+}
 
 /**
  * Reads a X.509 certificate from the specified PEM file.
@@ -863,7 +894,7 @@ int SK_UTIL_write_x509_certificate(const char *pem_filename, X509 *cert)
 	if (pem_filename == NULL || cert == NULL)
 		return -EINVAL;
 
-	fp = fopen(pem_filename, "w");
+	fp = fopen_nofollow(pem_filename, "w");
 	if (fp == NULL)
 		return -errno;
 
@@ -898,7 +929,7 @@ int SK_UTIL_write_x509_request(const char *pem_filename, X509_REQ *req,
 	if (pem_filename == NULL || req == NULL)
 		return -EINVAL;
 
-	fp = fopen(pem_filename, "w");
+	fp = fopen_nofollow(pem_filename, "w");
 	if (fp == NULL)
 		return -errno;
 
@@ -982,7 +1013,7 @@ int SK_UTIL_write_key_blob(const char *filename, unsigned char *key_blob,
 	if (filename == NULL || key_blob == NULL || key_blob_len == 0)
 		return -EINVAL;
 
-	fp = fopen(filename, "w");
+	fp = fopen_nofollow(filename, "w");
 	if (fp == NULL)
 		return -errno;
 
@@ -1047,7 +1078,7 @@ int SK_UTIL_write_public_key(const char *pem_filename, EVP_PKEY *pkey)
 	if (pem_filename == NULL || pkey == NULL)
 		return -EINVAL;
 
-	fp = fopen(pem_filename, "w");
+	fp = fopen_nofollow(pem_filename, "w");
 	if (fp == NULL)
 		return -errno;
 
