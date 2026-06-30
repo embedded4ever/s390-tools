@@ -258,7 +258,9 @@ static int sk_cca_get_library_functions(const struct sk_ext_cca_lib *cca_lib,
  *
  * @param cca_lib           the CCA library structure
  * @param curve_nid         the nid specifying the curve.
- * @param key_token         a buffer to store the generated key token
+ * @param key_token         a buffer to store the generated key token. If NULL,
+ *                          the required buffer size is returned in
+ *                          key_token_length (size query).
  * @param key_token_length  On entry: the size of the buffer
  *                          On return: the size of the key token
  * @param debug             if true, debug messages are printed
@@ -286,7 +288,7 @@ int SK_CCA_generate_ec_key_pair(const struct sk_ext_cca_lib *cca_lib,
 	long param1 = 0;
 	int rc;
 
-	if (cca_lib == NULL || key_token == NULL || key_token_length == NULL)
+	if (cca_lib == NULL || key_token_length == NULL)
 		return -EINVAL;
 
 	if (key_token == NULL) {
@@ -384,7 +386,9 @@ int SK_CCA_generate_ec_key_pair(const struct sk_ext_cca_lib *cca_lib,
  *                          3, 5, 17, 257, or 65537. Specify zero to choose the
  *                          exponent by random (only possible for modulus_bits
  *                          up to 2048).
- * @param key_token         a buffer to store the generated key token
+ * @param key_token         a buffer to store the generated key token. If NULL,
+ *                          the required buffer size is returned in
+ *                          key_token_length (size query).
  * @param key_token_length  On entry: the size of the buffer
  *                          On return: the size of the key token
  * @param debug             if true, debug messages are printed
@@ -412,7 +416,7 @@ int SK_CCA_generate_rsa_key_pair(const struct sk_ext_cca_lib *cca_lib,
 	long param1 = 0;
 	int rc;
 
-	if (cca_lib == NULL || key_token == NULL || key_token_length == NULL)
+	if (cca_lib == NULL || key_token_length == NULL)
 		return -EINVAL;
 
 	if (key_token == NULL) {
