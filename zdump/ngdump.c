@@ -336,7 +336,7 @@ static int get_bootmap_dump_image_blkptr(struct zg_fh *zg_fh, union disk_blockpt
  * This function parses the bootloader program table stored on the nvme device
  * and returns the partition index where the dumper's kernel image is stored.
  */
-static int ngdump_get_nvme_part_num(struct zg_fh *zg_fh)
+static int get_nvme_part_num(struct zg_fh *zg_fh)
 {
 	union disk_blockptr dump_image_blkptr;
 	int blk_size, part_num, part_ext;
@@ -419,7 +419,7 @@ static int find_vol1_cdl_part_fh(struct zg_fh *zg_fh, uint64_t blockno, int blk_
  * This function parses the bootloader program table stored on the eckd device
  * and returns the partition index where the dumper's kernel image is stored.
  */
-static int ngdump_get_eckd_part_num(struct zg_fh *zg_fh)
+static int get_eckd_part_num(struct zg_fh *zg_fh)
 {
 	union disk_blockptr dump_image_blkptr;
 	struct eckd_blockptr *blockptr;
@@ -546,10 +546,10 @@ int ngdump_get_dump_part(struct zg_fh *zg_fh, char **part_path)
 
 	if (dasd_get_info(zg_fh->path, &dasd_info) == 0) {
 		ng_type = NG_TYPE_DASD;
-		part_num = ngdump_get_eckd_part_num(zg_fh);
+		part_num = get_eckd_part_num(zg_fh);
 	} else {
 		ng_type = NG_TYPE_NVME;
-		part_num = ngdump_get_nvme_part_num(zg_fh);
+		part_num = get_nvme_part_num(zg_fh);
 	}
 	if (part_num <= 0 ||
 	    ngdump_get_part_path(zg_fh->path, part_num, ng_type, part_path) < 0)
