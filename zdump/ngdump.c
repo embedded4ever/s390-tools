@@ -223,12 +223,10 @@ static int validate_meta(const char *mount_point, struct ngdump_meta *meta)
 		return -1;
 	}
 
-	util_asprintf(&filename, "%s/%s", mount_point, meta->file);
-
-	rc = access(filename, R_OK);
+	rc = ngdump_get_dump_path(mount_point, meta, &filename);
 	if (rc) {
-		warnx("Could not access dump file \"%s\"", meta->file);
-		goto out;
+		warnx("Could not resolve path to dump file \"%s\"", meta->file);
+		return -1;
 	}
 
 	rc = check_sha256sum(filename, meta->sha256sum);
@@ -607,4 +605,44 @@ int ngdump_get_dump_part(struct zg_fh *zg_fh, char **part_path)
 		return -1;
 
 	return part_num;
+}
+
+int ngdump_get_dump_path(const char *mount_point,
+			 const struct ngdump_meta *meta,
+			 char **path)
+
+{
+	char *filename = NULL;
+	char *real_path;
+	int rc;
+
+	util_asprintf(&filename, "%s/%s", mount_point, meta->file);
+
+	util_log_print(UTIL_LOG_DEBUG, "%s: Dump path %s\n",
+		       __func__, filename);
+
+	real_path = realpath(filename, NULL);
+	free(filename);
+	if (!real_path)
+		return -1;
+
+	util_log_print(UTIL_LOG_DEBUG, "%s: Real dump path %s\n",
+		       __func__, real_path);
+
+	/* Disallow escaping from a dump device with a relative path or
+	   symbolic link. */
+	if (strncmp(mount_point, real_path, strlen(mount_point)) != 0)
+		goto fail_free_real_path;
+
+	rc = access(real_path, R_OK);
+	if (rc)
+		goto fail_free_real_path;
+
+	*path = real_path;
+
+	return 0;
+
+fail_free_real_path:
+	free(real_path);
+	return -1;
 }

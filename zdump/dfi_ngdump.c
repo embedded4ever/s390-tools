@@ -32,6 +32,7 @@ static int open_dump_file(void)
 {
 	char *mount_point = NULL;
 	char *filename = NULL;
+	int rc;
 
 	mount_point = util_strdup("/tmp/zdump-ngdump-XXXXXX");
 
@@ -46,7 +47,11 @@ static int open_dump_file(void)
 		goto fail_rmdir;
 	}
 
-	util_asprintf(&filename, "%s/%s", mount_point, l.meta.file);
+	rc = ngdump_get_dump_path(mount_point, &l.meta, &filename);
+	if (rc) {
+		warnx("Could not resolve path to dump file \"%s\"", l.meta.file);
+		goto fail_rmdir;
+	}
 
 	g.fh = zg_open(filename, O_RDONLY, ZG_CHECK);
 	free(filename);
