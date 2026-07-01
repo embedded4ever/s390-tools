@@ -29,6 +29,11 @@
  * - Bit Maps
  * - Key Maps
  * - Guest Storage
+ *
+ * For more details on CP Data Areas and and Control Blocks see the
+ * documentation here:
+ * https://www.ibm.com/support/pages/zvm/pubs/cp740/index.html
+ *
  */
 
 /*
