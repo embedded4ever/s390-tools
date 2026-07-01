@@ -23,9 +23,6 @@
 #include "dfi_vmcoreinfo.h"
 #include "dfo.h"
 
-#define HDR_PER_MEMC_SIZE	0x100
-#define HDR_BASE_SIZE		0x2000
-
 /*
  * Initialize ELF loads program headers
  */
@@ -113,6 +110,28 @@ static void dump_chunks_init(void *hdr, u64 hdr_size)
 }
 
 /*
+ * Calculate the size of the ELF header buffer.
+ *
+ * The buffer contains the following fixed-size items:
+ *   - Elf64_Ehdr
+ *   - PT_NOTE program header (1x Elf64_Phdr)
+ *   - prpsinfo note
+ * Plus variable-size items:
+ *   - PT_LOAD program headers (one Elf64_Phdr per memory chunk)
+ *   - per-CPU notes
+ *   - vmcoreinfo note (if present)
+ */
+static u32 hdr_alloc_size(const char *vmcoreinfo)
+{
+	return sizeof(Elf64_Ehdr) +
+	       sizeof(Elf64_Phdr) +
+	       ELF64_NOTE_SIZE(NOTE_NAME_CORE, sizeof(struct nt_prpsinfo_64)) +
+	       dfi_mem_chunk_cnt() * sizeof(Elf64_Phdr) +
+	       dfi_cpu_cnt() * get_max_note_size_per_cpu() +
+	       (vmcoreinfo ? ELF64_NOTE_SIZE(NOTE_NAME_VMCOREINFO, strlen(vmcoreinfo)) : 0);
+}
+
+/*
  * Initialize ELF output dump format
  */
 static void dfo_elf_init(void)
@@ -121,10 +140,10 @@ static void dfo_elf_init(void)
 	u32 alloc_size;
 	void *buf, *ptr;
 	u64 hdr_off;
+	const char *vmcoreinfo = dfi_vmcoreinfo_get();
 
 	df_elf_ensure_s390x();
-	alloc_size = HDR_BASE_SIZE + dfi_cpu_cnt() * get_max_note_size_per_cpu() +
-		     dfi_mem_chunk_cnt() * HDR_PER_MEMC_SIZE;
+	alloc_size = hdr_alloc_size(vmcoreinfo);
 	buf = zg_alloc(alloc_size);
 	/* Init elf header */
 	ptr = ehdr_init(buf, dfi_mem_chunk_cnt() + 1);
