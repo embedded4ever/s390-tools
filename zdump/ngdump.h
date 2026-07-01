@@ -12,6 +12,8 @@
 #ifndef ZGETDUMP_NGDUMP_H
 #define ZGETDUMP_NGDUMP_H
 
+#include "zg.h"
+
 #define NGDUMP_FSTYPE	"ext4"
 
 struct ngdump_meta {
