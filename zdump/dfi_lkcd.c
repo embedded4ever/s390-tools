@@ -43,15 +43,29 @@ static void read_page_buf(struct df_lkcd_pg_hdr *pg_hdr, void *buf)
 	unsigned long size = PAGE_SIZE;
 	unsigned char cbuf[PAGE_SIZE];
 
+	if (pg_hdr->size > PAGE_SIZE)
+		ERR_EXIT("Dump file inconsistent, LKCD page size too large (%u)",
+			 pg_hdr->size);
 	switch (pg_hdr->flags) {
 	case DF_LKCD_DH_RAW:
-		zg_read(g.fh, buf, pg_hdr->size, ZG_CHECK);
+		if (pg_hdr->size == 0) {
+			/* No data in file: treat as zero page */
+			memset(buf, 0, PAGE_SIZE);
+			break;
+		}
+		if (pg_hdr->size == PAGE_SIZE) {
+			zg_read(g.fh, buf, pg_hdr->size, ZG_CHECK);
+			break;
+		}
+		ERR_EXIT("Dump file inconsistent, LKCD page size invalid: %u", pg_hdr->size);
 		break;
 	case DF_LKCD_DH_COMPRESSED:
 		zg_read(g.fh, cbuf, pg_hdr->size, ZG_CHECK);
-		uncompress(buf, &size, cbuf, pg_hdr->size);
+		if (uncompress(buf, &size, cbuf, pg_hdr->size) != Z_OK)
+			ERR_EXIT("Dump file inconsistent, LKCD page decompression failed");
 		if (size != PAGE_SIZE)
-			ABORT("Invalid page size: %ld", size);
+			ERR_EXIT("Dump file inconsistent, LKCD decompressed page size invalid: %u",
+				 size);
 		break;
 	default:
 		ERR_EXIT("Unsupported page flags: %x at addr %Lx",
