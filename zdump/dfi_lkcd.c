@@ -225,6 +225,9 @@ static int mem_init_flex(void)
 		}
 		if (dump_end(addr, &pg_hdr))
 			break;
+		if (pg_hdr.addr + PAGE_SIZE > l.hdr.mem_end)
+			ERR_EXIT("Dump file inconsistent, LKCD page address out of range (0x%llx)",
+				 pg_hdr.addr);
 		if (pg_hdr.addr - addr > MEM_HOLE_SIZE_MIN) {
 			dfi_mem_chunk_add(mem_chunk_start,
 					  addr + PAGE_SIZE - mem_chunk_start,
