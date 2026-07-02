@@ -156,7 +156,7 @@ struct zg_fh *zg_open(const char *path, int flags, enum zg_check check)
 			goto fail;
 		ERR_EXIT_ERRNO("Could not open \"%s\"", path);
 	}
-	if (stat(path, &zg_fh->sb) == -1) {
+	if (fstat(zg_fh->fh, &zg_fh->sb) == -1) {
 		if (check == ZG_CHECK_NONE)
 			goto fail;
 		ERR_EXIT_ERRNO("Could not access file \"%s\"", path);
