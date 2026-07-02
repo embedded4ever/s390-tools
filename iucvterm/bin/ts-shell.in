@@ -217,7 +217,7 @@ sub loadAuthorization(\%)
 		my ($key, $val) = split /\s*=\s*/;
 
 		# read authorization configuration for user and its groups
-		if ($key =~ /^$cfg->{user}$/) {
+		if ($key =~ /^\Q$cfg->{user}\E$/) {
 			$authorized = 1;
 			log_debug "Found user: $key";
 
