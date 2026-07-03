@@ -26,6 +26,6 @@ else
 fi
 
 echo "Mounting ${block_dev} to ${mntp}"
-mount --options ro "${block_dev}" "${mntp}"
+mount -t ext4 --options ro,nodev,nosuid,noexec "${block_dev}" "${mntp}"
 
 exit 0
