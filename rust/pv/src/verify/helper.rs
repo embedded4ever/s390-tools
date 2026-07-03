@@ -729,4 +729,141 @@ mod tests {
 
         download_with_mock(cert, responses)
     }
+
+    mod distribution_points {
+        use super::*;
+
+        #[test]
+        fn extract_single_distribution_point() {
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+            let dps = x509_dist_points(&cert);
+            assert_eq!(dps.len(), 1);
+            assert_eq!(dps[0], "http://example.com/test.crl");
+        }
+
+        #[test]
+        fn extract_multiple_distribution_points() {
+            let cert = create_cert_with_crl_dps(&[
+                "http://primary.example.com/test.crl",
+                "http://backup.example.com/test.crl",
+            ]);
+            let dps = x509_dist_points(&cert);
+            assert_eq!(dps.len(), 2);
+            assert_eq!(dps[0], "http://primary.example.com/test.crl");
+            assert_eq!(dps[1], "http://backup.example.com/test.crl");
+        }
+
+        #[test]
+        fn extract_no_distribution_points() {
+            let cert = create_cert_with_crl_dps(&[]);
+            let dps = x509_dist_points(&cert);
+            assert!(dps.is_empty());
+        }
+    }
+
+    mod download_success {
+        use super::*;
+
+        #[test]
+        fn download_success_single_dp() {
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+            let crl_data = std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap();
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_response(crl_data),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            let crls = result.unwrap();
+            assert!(crls.is_some());
+            assert_eq!(crls.unwrap().len(), 1);
+        }
+
+        #[test]
+        fn download_no_crl_available() {
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+
+            let mut responses = HashMap::new();
+            responses.insert("http://example.com/test.crl".to_string(), mock_failure());
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_none());
+        }
+
+        #[test]
+        fn download_first_dp_succeeds() {
+            let cert = create_cert_with_crl_dps(&[
+                "http://primary.example.com/test.crl",
+                "http://backup.example.com/test.crl",
+            ]);
+            let crl_data = std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap();
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://primary.example.com/test.crl".to_string(),
+                mock_response(crl_data),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_some());
+        }
+
+        #[test]
+        fn download_fallback_to_second_dp() {
+            let cert = create_cert_with_crl_dps(&[
+                "http://primary.example.com/test.crl",
+                "http://backup.example.com/test.crl",
+            ]);
+            let crl_data = std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap();
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://primary.example.com/test.crl".to_string(),
+                mock_failure(),
+            );
+            responses.insert(
+                "http://backup.example.com/test.crl".to_string(),
+                mock_response(crl_data),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_some());
+        }
+
+        #[test]
+        fn download_invalid_crl_data() {
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_response(vec![0x00, 0x01, 0x02, 0x03]),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_none());
+        }
+
+        #[test]
+        fn download_empty_response() {
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_response(vec![]),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_none());
+        }
+    }
 }
