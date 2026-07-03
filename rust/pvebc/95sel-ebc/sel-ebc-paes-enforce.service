@@ -4,7 +4,8 @@ Description=Enforce PAES encrypted root fs for SEL guests
 # Ensure this runs before the handoff to the real root, if that's required:
 After=cryptsetup.target
 After=initrd-root-device.target
-Before=sysroot.mount
+After=sysroot.mount
+Before=initrd-switch-root.service
 
 # Initramfs requirement
 DefaultDependencies=no
