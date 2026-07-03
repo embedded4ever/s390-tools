@@ -5,7 +5,7 @@
 use core::slice;
 use std::path::Path;
 
-use helper::download_first_crl_from_x509;
+use helper::{download_first_crl_from_x509, StoreSetupMode};
 use log::{debug, trace};
 use openssl::error::ErrorStack;
 use openssl::stack::Stack;
@@ -181,25 +181,45 @@ impl CertVerifier {
         Q: AsRef<Path>,
         R: AsRef<Path>,
     {
-        let mut store = helper::store_setup(root_ca_path, crl_paths, cert_paths)?;
         let mut untr_certs = Vec::with_capacity(cert_paths.len());
         for path in cert_paths {
             let mut crt = read_certs(&read_file(path, "certificate")?)?;
-            if !offline {
-                for c in &crt {
-                    if let Some(crl) = download_first_crl_from_x509(c)? {
-                        crl.iter().try_for_each(|c| store.add_crl(c))?;
-                    }
-                }
-            }
             untr_certs.append(&mut crt);
         }
+        let (ibm_z_sign_key, chain) = helper::extract_ibm_sign_key(untr_certs.clone())?;
 
-        // remove the IBM signing certificate from chain.
-        // We have to verify them separately as they are not marked as intermediate certs
-        let (ibm_z_sign_key, chain) = helper::extract_ibm_sign_key(untr_certs)?;
+        // Two-round verification:
+        //
+        // Round 1: Verify chain without CRL checks before downloading files
+        // from URLs from (yet) untrusted certificates.
+        let store_builder = helper::store_setup(
+            root_ca_path.as_ref(),
+            crl_paths,
+            cert_paths,
+            StoreSetupMode::WithoutCrlCheck,
+        )?;
+        helper::verify_chain(
+            &store_builder.build(),
+            &chain,
+            slice::from_ref(&ibm_z_sign_key),
+        )?;
 
-        let store = store.build();
+        // Round 2: Download CRLs and verify again, but this time with CRL checks
+        let mut store_builder = helper::store_setup(
+            root_ca_path,
+            crl_paths,
+            cert_paths,
+            StoreSetupMode::WithCrlCheck,
+        )?;
+        if !offline {
+            for cert in &untr_certs {
+                if let Some(crls) = download_first_crl_from_x509(cert)? {
+                    crls.iter().try_for_each(|c| store_builder.add_crl(c))?;
+                }
+            }
+        }
+
+        let store = store_builder.build();
         helper::verify_chain(&store, &chain, slice::from_ref(&ibm_z_sign_key))?;
 
         Ok(Self {

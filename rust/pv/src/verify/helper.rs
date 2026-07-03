@@ -110,21 +110,27 @@ pub fn verify_crl(crl: &X509CrlRef, issuer: &X509Ref) -> Option<()> {
     }
 }
 
+pub enum StoreSetupMode {
+    WithCrlCheck,
+    WithoutCrlCheck,
+}
+
 /// Setup the x509Store such that it can be used it for verifying certificates
 pub fn store_setup<P: AsRef<Path>, Q: AsRef<Path>, R: AsRef<Path>>(
     root_ca_path: Option<P>,
     crl_paths: &[Q],
     cert_w_crl_paths: &[R],
+    mode: StoreSetupMode,
 ) -> Result<X509StoreBuilder> {
-    let mut x509store = X509StoreBuilder::new()?;
+    let mut x509store_builder = X509StoreBuilder::new()?;
 
     match root_ca_path {
-        None => x509store.set_default_paths()?,
-        Some(p) => load_root_ca(p, &mut x509store)?,
+        None => x509store_builder.set_default_paths()?,
+        Some(p) => load_root_ca(p, &mut x509store_builder)?,
     }
 
     for crl in crl_paths {
-        load_crl_to_store(&mut x509store, crl, true).map_err(|source| Error::X509Load {
+        load_crl_to_store(&mut x509store_builder, crl, true).map_err(|source| Error::X509Load {
             path: crl.as_ref().into(),
             ty: Error::CRL,
             source,
@@ -132,27 +138,35 @@ pub fn store_setup<P: AsRef<Path>, Q: AsRef<Path>, R: AsRef<Path>>(
     }
 
     for crl in cert_w_crl_paths {
-        load_crl_to_store(&mut x509store, crl, false).map_err(|source| Error::X509Load {
-            path: crl.as_ref().into(),
-            ty: Error::CRL,
-            source,
+        load_crl_to_store(&mut x509store_builder, crl, false).map_err(|source| {
+            Error::X509Load {
+                path: crl.as_ref().into(),
+                ty: Error::CRL,
+                source,
+            }
         })?;
     }
     let mut param = X509VerifyParam::new()?;
-    let flags = X509VerifyFlags::X509_STRICT
-        | X509VerifyFlags::CRL_CHECK
-        | X509VerifyFlags::CRL_CHECK_ALL
+    let mut flags = X509VerifyFlags::X509_STRICT
         | X509VerifyFlags::TRUSTED_FIRST
         | X509VerifyFlags::CHECK_SS_SIGNATURE
         | X509VerifyFlags::POLICY_CHECK;
+    match mode {
+        StoreSetupMode::WithCrlCheck => {
+            flags |= X509VerifyFlags::CRL_CHECK | X509VerifyFlags::CRL_CHECK_ALL
+        }
+        StoreSetupMode::WithoutCrlCheck => {
+            // nothing to do
+        }
+    }
 
     param.set_depth(SECURITY_CHAIN_MAX_LEN);
     param.set_auth_level(SECURITY_LEVEL as i32);
     param.set_purpose(X509PurposeId::ANY)?;
     param.set_flags(flags)?;
-    x509store.set_param(&param)?;
+    x509store_builder.set_param(&param)?;
 
-    Ok(x509store)
+    Ok(x509store_builder)
 }
 
 /// Verify that the given IBM signing keys can be trusted

@@ -9,6 +9,7 @@ use openssl::stack::Stack;
 use super::helper::*;
 use super::{helper, *};
 use crate::test_utils::*;
+use crate::verify::helper::StoreSetupMode;
 use crate::Error;
 use crate::HkdVerifyErrorType::*;
 
@@ -18,7 +19,12 @@ fn store_setup() {
     let inter_path = get_cert_asset_path("inter.crt");
     let crls: [String; 0] = [];
 
-    let store = helper::store_setup(None::<String>, &crls, &[&ibm_path, &inter_path]);
+    let store = helper::store_setup(
+        None::<String>,
+        &crls,
+        &[&ibm_path, &inter_path],
+        StoreSetupMode::WithCrlCheck,
+    );
     assert!(store.is_ok());
 }
 
@@ -41,9 +47,14 @@ fn verify_chain_offline() {
     let root_crt = get_cert_asset_path("root_ca.chained.crt");
     let certs: [String; 0] = [];
 
-    let store = helper::store_setup(Some(&root_crt), &[&inter_crl], &certs)
-        .unwrap()
-        .build();
+    let store = helper::store_setup(
+        Some(&root_crt),
+        &[&inter_crl],
+        &certs,
+        StoreSetupMode::WithCrlCheck,
+    )
+    .unwrap()
+    .build();
 
     let mut sk = Stack::<X509>::new().unwrap();
     sk.push(inter_crt).unwrap();
