@@ -173,8 +173,12 @@ pub enum HkdVerifyErrorType {
     IssuerMismatch,
     #[error("No CRL distribution points found")]
     NoCrlDP,
+    #[error("CRL distribution point uses unsupported protocol (only HTTP/HTTPS allowed)")]
+    InvalidCrlProtocol,
     #[error("The IBM Z signing key could not be verified. Error occurred at level {1}")]
     IbmSignInvalid(#[source] openssl::x509::X509VerifyResult, u32),
+    #[error("Too many redirections during CRL download")]
+    TooManyRedirectionsCrlDownload,
     #[error("CRL download failed")]
     CrlDownloadFailed,
 }

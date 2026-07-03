@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::from_utf8;
 use std::time::Duration;
 
-use log::debug;
+use log::{debug, warn};
 use openssl::asn1::{Asn1Time, Asn1TimeRef};
 use openssl::error::ErrorStack;
 use openssl::nid::Nid;
@@ -37,6 +37,24 @@ const SECURITY_LEVEL: usize = 2;
 const SECURITY_BITS_ARRAY: [u32; 6] = [0, 80, 112, 128, 192, 256];
 const SECURITY_BITS: u32 = SECURITY_BITS_ARRAY[SECURITY_LEVEL];
 const SECURITY_CHAIN_MAX_LEN: c_int = 2;
+
+/// Maximum number of HTTP(S) redirections allowed when downloading CRLs.
+///
+/// This limit prevents infinite redirect loops and potential denial-of-service
+/// attacks through redirect chains. When downloading a CRL from a distribution
+/// point, if the number of redirects exceeds this limit, the download fails
+/// with [`HkdVerifyErrorType::TooManyRedirectionsCrlDownload`].
+///
+/// # Security
+///
+/// Each redirect URL is validated to ensure it uses HTTP or HTTPS protocol only,
+/// preventing protocol downgrade attacks or redirects to unsafe protocols.
+///
+/// # Value
+///
+/// Set to 10 redirections, which should be sufficient for legitimate CDN setups
+/// while preventing abuse.
+const CRL_MAX_REDIRECTIONS: usize = 10;
 
 /// Verifies that the HKD
 /// * has enough security bits
@@ -305,6 +323,27 @@ pub fn x509_dist_points(cert: &X509Ref) -> Vec<String> {
     res
 }
 
+/// Validates that a URL uses HTTP or HTTPS protocol
+///
+/// # Arguments
+/// * `url` - The URL to validate
+///
+/// # Returns
+/// * `Ok(())` if protocol is HTTP or HTTPS
+/// * `Err(Error::HkdVerify(InvalidCrlProtocol))` otherwise
+///
+/// # Security
+/// This function enforces protocol restrictions to prevent CRL downloads from
+/// potentially unsafe protocols like FTP, file://, or custom schemes.
+fn validate_crl_url_protocol(url: &str) -> Result<()> {
+    let url_lower = url.to_lowercase();
+    if url_lower.starts_with("http://") || url_lower.starts_with("https://") {
+        Ok(())
+    } else {
+        bail_hkd_verify!(InvalidCrlProtocol)
+    }
+}
+
 /// Trait for HTTP client operations to enable testing
 trait HttpClient {
     fn url(&mut self, url: &str) -> Result<()>;
@@ -313,6 +352,7 @@ trait HttpClient {
     fn perform(&mut self) -> Result<()>;
     fn get(&mut self, enable: bool) -> Result<()>;
     fn follow_location(&mut self, enable: bool) -> Result<()>;
+    fn redirect_url(&self) -> Result<Option<String>>;
     fn get_ref(&self) -> &[u8];
 }
 
@@ -380,10 +420,23 @@ mod prod_client {
             self.handle.useragent(agent)?;
             Ok(())
         }
+
+        fn redirect_url(&self) -> Result<Option<String>> {
+            Ok(self.handle.redirect_url()?.map(|s| s.to_string()))
+        }
     }
 
     /// Searches for CRL Distribution points and downloads the CRL. Stops after the first successful
     /// download.
+    ///
+    /// # Security
+    ///
+    /// This function enforces the following security restrictions:
+    /// 1. **Protocol Restriction**: Only HTTP and HTTPS protocols are allowed for
+    ///    CRL downloads. This prevents potential security issues with other protocols
+    ///    like FTP, file://, or custom schemes.
+    /// 2. **Redirect Protocol Restriction**: Redirects are only allowed to HTTP/HTTPS destinations,
+    ///    preventing protocol downgrade attacks.
     ///
     /// Error if something bad(=unexpected) happens
     /// CRL not available at all URIs and unexpected format at all URIs are mapped to Ok(None)
@@ -410,17 +463,43 @@ fn download_first_crl_from_x509_impl<H: HttpClient>(
     use crate::utils::read_crls;
     const CRL_TIMEOUT_MAX: Duration = Duration::from_secs(3);
 
-    for dist_point in x509_dist_points(cert) {
-        client.url(&dist_point)?;
+    'outer: for dist_point_url in x509_dist_points(cert) {
+        // Validate protocol BEFORE attempting download
+        if validate_crl_url_protocol(&dist_point_url).is_err() {
+            warn!("Invalid CRL URL protocol, skipping: {}", dist_point_url);
+            continue;
+        }
+
+        client.url(&dist_point_url)?;
         client.get(true)?;
-        client.follow_location(true)?;
+        // Disable automatic redirects - we handle them manually to validate the
+        // protocol of each redirect URL and to limit the amount of
+        // redirections.
+        client.follow_location(false)?;
         client.timeout(CRL_TIMEOUT_MAX)?;
         client.useragent("s390-tools-pv-crl")?;
 
-        if let Err(err) = client.perform() {
-            debug!("Failed to download CRL: {}", err);
-            continue;
+        for i in 0..CRL_MAX_REDIRECTIONS {
+            if let Err(err) = client.perform() {
+                debug!("Failed to download CRL: {}", err);
+                continue 'outer;
+            }
+
+            if let Some(url) = client.redirect_url()? {
+                if i == CRL_MAX_REDIRECTIONS - 1 {
+                    bail_hkd_verify!(TooManyRedirectionsCrlDownload);
+                }
+                if validate_crl_url_protocol(&url).is_err() {
+                    continue 'outer;
+                }
+                debug!("Redirection to: {url}");
+                client.url(&url)?;
+            } else {
+                // No redirection, therefore let's stop and read the data
+                break;
+            }
         }
+
         match read_crls(client.get_ref()) {
             Err(_) => continue,
             Ok(crl) if crl.is_empty() => continue,
@@ -561,6 +640,7 @@ mod tests {
     /// Mock HTTP response for testing
     pub struct MockResponse {
         pub data: Vec<u8>,
+        pub redirect_to: Option<String>,
         pub should_fail: bool,
     }
 
@@ -591,7 +671,13 @@ mod tests {
             Ok(())
         }
 
-        fn follow_location(&mut self, _enable: bool) -> Result<()> {
+        fn follow_location(&mut self, enable: bool) -> Result<()> {
+            // The Rust curl crate does not support to limit the protocols,
+            // therefore expect that our workaround is used.
+            assert!(
+                !enable,
+                "Unexpected curl crate redirection instead of pv redirection used "
+            );
             Ok(())
         }
 
@@ -615,6 +701,14 @@ mod tests {
             }
         }
 
+        fn redirect_url(&self) -> Result<Option<String>> {
+            if let Some(response) = self.responses.get(&self.url) {
+                Ok(response.redirect_to.clone())
+            } else {
+                Ok(None)
+            }
+        }
+
         fn get_ref(&self) -> &[u8] {
             if let Some(response) = self.responses.get(&self.url) {
                 &response.data
@@ -628,6 +722,16 @@ mod tests {
     fn mock_response(data: Vec<u8>) -> MockResponse {
         MockResponse {
             data,
+            redirect_to: None,
+            should_fail: false,
+        }
+    }
+
+    /// Helper to create mock redirect response
+    fn mock_redirect(redirect_to: &str) -> MockResponse {
+        MockResponse {
+            data: vec![],
+            redirect_to: Some(redirect_to.to_string()),
             should_fail: false,
         }
     }
@@ -636,6 +740,7 @@ mod tests {
     fn mock_failure() -> MockResponse {
         MockResponse {
             data: vec![],
+            redirect_to: None,
             should_fail: true,
         }
     }
@@ -732,6 +837,51 @@ mod tests {
         }
 
         download_with_mock(cert, responses)
+    }
+
+    mod protocol_validation {
+        use super::*;
+
+        #[test]
+        fn validate_protocol_http() {
+            assert!(validate_crl_url_protocol("http://example.com/test.crl").is_ok());
+        }
+
+        #[test]
+        fn validate_protocol_https() {
+            assert!(validate_crl_url_protocol("https://example.com/test.crl").is_ok());
+        }
+
+        #[test]
+        fn validate_protocol_ftp_rejected() {
+            assert!(matches!(
+                validate_crl_url_protocol("ftp://example.com/test.crl"),
+                Err(Error::HkdVerify(InvalidCrlProtocol))
+            ));
+        }
+
+        #[test]
+        fn validate_protocol_file_rejected() {
+            assert!(matches!(
+                validate_crl_url_protocol("file:///tmp/test.crl"),
+                Err(Error::HkdVerify(InvalidCrlProtocol))
+            ));
+        }
+
+        #[test]
+        fn validate_protocol_custom_rejected() {
+            assert!(matches!(
+                validate_crl_url_protocol("custom://example.com/test.crl"),
+                Err(Error::HkdVerify(InvalidCrlProtocol))
+            ));
+        }
+
+        #[test]
+        fn validate_protocol_case_insensitive() {
+            assert!(validate_crl_url_protocol("HTTP://example.com/test.crl").is_ok());
+            assert!(validate_crl_url_protocol("HTTPS://example.com/test.crl").is_ok());
+            assert!(validate_crl_url_protocol("HtTpS://example.com/test.crl").is_ok());
+        }
     }
 
     mod distribution_points {
@@ -841,6 +991,25 @@ mod tests {
         }
 
         #[test]
+        fn download_skip_invalid_protocol() {
+            let cert = create_cert_with_crl_dps(&[
+                "ftp://example.com/test.crl",
+                "http://example.com/test.crl",
+            ]);
+            let crl_data = std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap();
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_response(crl_data),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_some());
+        }
+
+        #[test]
         fn download_invalid_crl_data() {
             let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
 
@@ -868,6 +1037,152 @@ mod tests {
             let result = download_with_mock(&cert, responses);
             assert!(result.is_ok());
             assert!(result.unwrap().is_none());
+        }
+    }
+
+    mod redirect_handling {
+        use super::*;
+
+        #[test]
+        fn redirect_single_valid() {
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+            let crl_data = std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap();
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_redirect("http://cdn.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://cdn.example.com/test.crl".to_string(),
+                mock_response(crl_data),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_some());
+        }
+
+        #[test]
+        fn redirect_to_invalid_protocol() {
+            let cert = create_cert_with_crl_dps(&[
+                "http://example.com/test.crl",
+                "http://backup.example.com/test.crl",
+            ]);
+            let crl_data = std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap();
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_redirect("ftp://example.com/test.crl"),
+            );
+            responses.insert(
+                "http://backup.example.com/test.crl".to_string(),
+                mock_response(crl_data),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_some());
+        }
+
+        #[test]
+        fn redirect_too_many() {
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_redirect("http://redirect1.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect1.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect2.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect2.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect3.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect3.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect4.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect4.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect5.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect5.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect6.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect6.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect7.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect7.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect8.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect8.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect9.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect9.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect10.example.com/test.crl"),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(matches!(
+                result,
+                Err(Error::HkdVerify(TooManyRedirectionsCrlDownload))
+            ));
+        }
+
+        #[test]
+        fn redirect_chain_valid() {
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+            let crl_data = std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap();
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_redirect("http://redirect1.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect1.example.com/test.crl".to_string(),
+                mock_redirect("http://redirect2.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect2.example.com/test.crl".to_string(),
+                mock_response(crl_data),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_some());
+        }
+
+        #[test]
+        fn redirect_endless_loop() {
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+
+            let mut responses = HashMap::new();
+            // Create a circular redirect: A -> B -> A
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_redirect("http://redirect.example.com/test.crl"),
+            );
+            responses.insert(
+                "http://redirect.example.com/test.crl".to_string(),
+                mock_redirect("http://example.com/test.crl"),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            assert!(matches!(
+                result,
+                Err(Error::HkdVerify(TooManyRedirectionsCrlDownload))
+            ));
         }
     }
 }
