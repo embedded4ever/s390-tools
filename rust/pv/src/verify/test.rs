@@ -4,37 +4,13 @@
 
 #![cfg(test)]
 
-use std::path::Path;
-
 use openssl::stack::Stack;
-use openssl::x509::X509Crl;
 
 use super::helper::*;
 use super::{helper, *};
 use crate::test_utils::*;
-use crate::utils::read_crls;
 use crate::Error;
 use crate::HkdVerifyErrorType::*;
-
-// Mock function
-pub fn download_first_crl_from_x509(cert: &X509Ref) -> Result<Option<Vec<X509Crl>>> {
-    fn mock_download<P: AsRef<Path>>(path: P) -> Result<Vec<X509Crl>> {
-        read_crls(std::fs::read(path)?)
-    }
-
-    for dist_point in x509_dist_points(cert) {
-        {
-            let path = get_cert_asset_path(&dist_point);
-            let crls = if let Ok(buf) = mock_download(&path) {
-                buf
-            } else {
-                continue;
-            };
-            return Ok(Some(crls));
-        }
-    }
-    Ok(None)
-}
 
 #[test]
 fn store_setup() {

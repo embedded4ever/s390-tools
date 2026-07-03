@@ -22,6 +22,8 @@ use openssl::x509::{
 };
 #[cfg(not(test))]
 pub(crate) use prod_client::download_first_crl_from_x509;
+#[cfg(test)]
+pub(crate) use tests::download_first_crl_from_x509;
 
 use crate::error::bail_hkd_verify;
 use crate::openssl_extensions::{AkidCheckResult, AkidExtension};
@@ -544,5 +546,187 @@ mod tests {
             Err(Error::HkdVerify(NoIbmSignKey))
         ));
         assert!(super::get_ibm_z_sign_key(&[ibm_crt, no_sign_crt]).is_ok(),);
+    }
+
+    use std::collections::HashMap;
+
+    use openssl::bn::{BigNum, MsbOption};
+    use openssl::hash::MessageDigest;
+    use openssl::pkey::PKey;
+    use openssl::rsa::Rsa;
+    use openssl::x509::{X509Builder, X509Crl, X509Extension, X509NameBuilder};
+
+    use crate::test_utils::get_cert_asset_path;
+
+    /// Mock HTTP response for testing
+    pub struct MockResponse {
+        pub data: Vec<u8>,
+        pub should_fail: bool,
+    }
+
+    /// Mock HTTP client for testing
+    pub struct MockHttpClient {
+        url: String,
+        responses: HashMap<String, MockResponse>,
+        perform_count: usize,
+    }
+
+    impl MockHttpClient {
+        pub fn new(responses: HashMap<String, MockResponse>) -> Self {
+            Self {
+                url: String::new(),
+                responses,
+                perform_count: 0,
+            }
+        }
+    }
+
+    impl HttpClient for MockHttpClient {
+        fn url(&mut self, url: &str) -> Result<()> {
+            self.url = url.to_string();
+            Ok(())
+        }
+
+        fn get(&mut self, _enable: bool) -> Result<()> {
+            Ok(())
+        }
+
+        fn follow_location(&mut self, _enable: bool) -> Result<()> {
+            Ok(())
+        }
+
+        fn timeout(&mut self, _timeout: Duration) -> Result<()> {
+            Ok(())
+        }
+
+        fn useragent(&mut self, _agent: &str) -> Result<()> {
+            Ok(())
+        }
+
+        fn perform(&mut self) -> Result<()> {
+            self.perform_count += 1;
+            if let Some(response) = self.responses.get(&self.url) {
+                if response.should_fail {
+                    bail_hkd_verify!(CrlDownloadFailed);
+                }
+                Ok(())
+            } else {
+                bail_hkd_verify!(CrlDownloadFailed);
+            }
+        }
+
+        fn get_ref(&self) -> &[u8] {
+            if let Some(response) = self.responses.get(&self.url) {
+                &response.data
+            } else {
+                &[]
+            }
+        }
+    }
+
+    /// Helper to create mock response with data
+    fn mock_response(data: Vec<u8>) -> MockResponse {
+        MockResponse {
+            data,
+            should_fail: false,
+        }
+    }
+
+    /// Helper to create mock failure response
+    fn mock_failure() -> MockResponse {
+        MockResponse {
+            data: vec![],
+            should_fail: true,
+        }
+    }
+
+    /// Helper to create test certificate with CRL distribution points
+    fn create_cert_with_crl_dps(crl_uris: &[&str]) -> X509 {
+        // Generate a key pair
+        let rsa = Rsa::generate(2048).unwrap();
+        let key_pair = PKey::from_rsa(rsa).unwrap();
+
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(2).unwrap();
+
+        // Set serial number
+        let serial = {
+            let mut num = BigNum::new().unwrap();
+            num.rand(159, MsbOption::MAYBE_ZERO, false).unwrap();
+            num.to_asn1_integer().unwrap()
+        };
+        builder.set_serial_number(&serial).unwrap();
+
+        // Set subject name
+        let mut name_builder = X509NameBuilder::new().unwrap();
+        name_builder.append_entry_by_text("C", "US").unwrap();
+        name_builder
+            .append_entry_by_text("O", "Test Organization")
+            .unwrap();
+        name_builder
+            .append_entry_by_text("CN", "Test Certificate")
+            .unwrap();
+        let name = name_builder.build();
+
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(&key_pair).unwrap();
+
+        // Set validity
+        builder
+            .set_not_before(&Asn1Time::days_from_now(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&Asn1Time::days_from_now(365).unwrap())
+            .unwrap();
+
+        // Add CRL Distribution Points if provided
+        if !crl_uris.is_empty() {
+            // Create a single extension with all URIs
+            let crl_dp_value = crl_uris
+                .iter()
+                .map(|uri| format!("URI:{}", uri))
+                .collect::<Vec<_>>()
+                .join(",");
+            #[allow(deprecated)]
+            let crl_ext =
+                X509Extension::new_nid(None, None, Nid::CRL_DISTRIBUTION_POINTS, &crl_dp_value)
+                    .unwrap();
+            builder.append_extension(crl_ext).unwrap();
+        }
+
+        // Sign the certificate
+        builder.sign(&key_pair, MessageDigest::sha256()).unwrap();
+
+        builder.build()
+    }
+
+    /// Helper to test with mock client
+    fn download_with_mock(
+        cert: &X509Ref,
+        responses: HashMap<String, MockResponse>,
+    ) -> Result<Option<Vec<X509Crl>>> {
+        download_first_crl_from_x509_impl(cert, MockHttpClient::new(responses))
+    }
+
+    // Mock function
+    pub(crate) fn download_first_crl_from_x509(cert: &X509Ref) -> Result<Option<Vec<X509Crl>>> {
+        use std::collections::HashMap;
+
+        let dist_points = x509_dist_points(cert);
+
+        // Build mock responses for each distribution point
+        let mut responses = HashMap::new();
+        for dist_point in dist_points {
+            // Treat distribution point as filename
+            let path = get_cert_asset_path(&dist_point);
+
+            if let Ok(crl_data) = std::fs::read(&path) {
+                responses.insert(dist_point, mock_response(crl_data));
+            }
+            // If file doesn't exist, skip this distribution point
+        }
+
+        download_with_mock(cert, responses)
     }
 }

@@ -5,15 +5,12 @@
 use core::slice;
 use std::path::Path;
 
-#[cfg(not(test))]
 use helper::download_first_crl_from_x509;
 use log::{debug, trace};
 use openssl::error::ErrorStack;
 use openssl::stack::Stack;
 use openssl::x509::store::X509Store;
 use openssl::x509::{CrlStatus, X509NameRef, X509Ref, X509StoreContext, X509StoreContextRef, X509};
-#[cfg(test)]
-use test::download_first_crl_from_x509;
 
 use crate::error::bail_hkd_verify;
 use crate::misc::{read_certs, read_file};

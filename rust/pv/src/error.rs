@@ -175,6 +175,8 @@ pub enum HkdVerifyErrorType {
     NoCrlDP,
     #[error("The IBM Z signing key could not be verified. Error occurred at level {1}")]
     IbmSignInvalid(#[source] openssl::x509::X509VerifyResult, u32),
+    #[error("CRL download failed")]
+    CrlDownloadFailed,
 }
 
 macro_rules! bail_hkd_verify {
