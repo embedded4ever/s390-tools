@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::ffi::c_int;
 use std::path::Path;
 use std::str::from_utf8;
+use std::time::Duration;
 
 use log::debug;
 use openssl::asn1::{Asn1Time, Asn1TimeRef};
@@ -19,6 +20,8 @@ use openssl::x509::{
     X509CrlRef, X509Name, X509NameRef, X509PurposeId, X509Ref, X509StoreContext,
     X509StoreContextRef, X509VerifyResult, X509,
 };
+#[cfg(not(test))]
+pub(crate) use prod_client::download_first_crl_from_x509;
 
 use crate::error::bail_hkd_verify;
 use crate::openssl_extensions::{AkidCheckResult, AkidExtension};
@@ -300,20 +303,31 @@ pub fn x509_dist_points(cert: &X509Ref) -> Vec<String> {
     res
 }
 
-/// Searches for CRL Distribution points and downloads the CRL. Stops after the first successful
-/// download.
-///
-/// Error if something bad(=unexpected) happens
-/// CRL not available at all URIs and unexpected format at all URIs are mapped to Ok(None)
+/// Trait for HTTP client operations to enable testing
+trait HttpClient {
+    fn url(&mut self, url: &str) -> Result<()>;
+    fn timeout(&mut self, timeout: Duration) -> Result<()>;
+    fn useragent(&mut self, agent: &str) -> Result<()>;
+    fn perform(&mut self) -> Result<()>;
+    fn get(&mut self, enable: bool) -> Result<()>;
+    fn follow_location(&mut self, enable: bool) -> Result<()>;
+    fn get_ref(&self) -> &[u8];
+}
+
+/// Production HTTP client implementation
 #[cfg(not(test))]
-pub fn download_first_crl_from_x509(cert: &X509Ref) -> Result<Option<Vec<openssl::x509::X509Crl>>> {
-    use std::time::Duration;
+mod prod_client {
 
     use curl::easy::{Easy2, Handler, WriteError};
 
-    use crate::utils::read_crls;
-    const CRL_TIMEOUT_MAX: Duration = Duration::from_secs(3);
-    struct Buf(Vec<u8>);
+    use super::*;
+
+    /// Production HTTP client using curl
+    pub(super) struct CurlHttpClient<H: Handler> {
+        handle: Easy2<H>,
+    }
+
+    pub(crate) struct Buf(Vec<u8>);
 
     impl Handler for Buf {
         fn write(&mut self, data: &[u8]) -> std::result::Result<usize, WriteError> {
@@ -322,20 +336,90 @@ pub fn download_first_crl_from_x509(cert: &X509Ref) -> Result<Option<Vec<openssl
         }
     }
 
-    for dist_point in x509_dist_points(cert) {
-        // A typical CRL is about 1200 bytes long
-        let mut handle = Easy2::new(Buf(Vec::with_capacity(1200)));
-        handle.url(&dist_point)?;
-        handle.get(true)?;
-        handle.follow_location(true)?;
-        handle.timeout(CRL_TIMEOUT_MAX)?;
-        handle.useragent("s390-tools-pv-crl")?;
+    impl CurlHttpClient<Buf> {
+        pub(super) fn new(capacity: usize) -> Self {
+            Self {
+                handle: Easy2::new(Buf(Vec::with_capacity(capacity))),
+            }
+        }
+    }
 
-        if let Err(err) = handle.perform() {
+    impl HttpClient for CurlHttpClient<Buf> {
+        fn get_ref(&self) -> &[u8] {
+            &self.handle.get_ref().0
+        }
+
+        fn perform(&mut self) -> Result<()> {
+            self.handle.perform()?;
+            Ok(())
+        }
+
+        fn get(&mut self, enable: bool) -> Result<(), Error> {
+            self.handle.get(enable)?;
+            Ok(())
+        }
+
+        fn follow_location(&mut self, enable: bool) -> Result<()> {
+            self.handle.follow_location(enable)?;
+            Ok(())
+        }
+
+        fn timeout(&mut self, timeout: Duration) -> Result<()> {
+            self.handle.timeout(timeout)?;
+            Ok(())
+        }
+
+        fn url(&mut self, url: &str) -> Result<()> {
+            self.handle.url(url)?;
+            Ok(())
+        }
+
+        fn useragent(&mut self, agent: &str) -> Result<()> {
+            self.handle.useragent(agent)?;
+            Ok(())
+        }
+    }
+
+    /// Searches for CRL Distribution points and downloads the CRL. Stops after the first successful
+    /// download.
+    ///
+    /// Error if something bad(=unexpected) happens
+    /// CRL not available at all URIs and unexpected format at all URIs are mapped to Ok(None)
+    pub(crate) fn download_first_crl_from_x509(
+        cert: &X509Ref,
+    ) -> Result<Option<Vec<openssl::x509::X509Crl>>> {
+        // A typical CRL is about 1200 bytes long
+        download_first_crl_from_x509_impl(cert, CurlHttpClient::new(1200))
+    }
+}
+
+/// Searches for CRL Distribution points and downloads the CRL. Stops after the first successful
+/// download.
+///
+/// Error if something bad(=unexpected) happens
+/// CRL not available at all URIs and unexpected format at all URIs are mapped to Ok(None)
+/// Internal implementation that accepts an HttpClient
+fn download_first_crl_from_x509_impl<H: HttpClient>(
+    cert: &X509Ref,
+    mut client: H,
+) -> Result<Option<Vec<openssl::x509::X509Crl>>> {
+    use std::time::Duration;
+
+    use crate::utils::read_crls;
+    const CRL_TIMEOUT_MAX: Duration = Duration::from_secs(3);
+
+    for dist_point in x509_dist_points(cert) {
+        client.url(&dist_point)?;
+        client.get(true)?;
+        client.follow_location(true)?;
+        client.timeout(CRL_TIMEOUT_MAX)?;
+        client.useragent("s390-tools-pv-crl")?;
+
+        if let Err(err) = client.perform() {
             debug!("Failed to download CRL: {}", err);
             continue;
         }
-        match read_crls(&handle.get_ref().0) {
+        match read_crls(client.get_ref()) {
             Err(_) => continue,
             Ok(crl) if crl.is_empty() => continue,
             Ok(crl) => return Ok(Some(crl)),
