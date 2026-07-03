@@ -323,8 +323,8 @@ pub fn download_first_crl_from_x509(cert: &X509Ref) -> Result<Option<Vec<openssl
     }
 
     for dist_point in x509_dist_points(cert) {
-        // A typical certificate is about 1200 bytes long
-        let mut handle = Easy2::new(Buf(Vec::with_capacity(1500)));
+        // A typical CRL is about 1200 bytes long
+        let mut handle = Easy2::new(Buf(Vec::with_capacity(1200)));
         handle.url(&dist_point)?;
         handle.get(true)?;
         handle.follow_location(true)?;
