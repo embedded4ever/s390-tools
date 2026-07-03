@@ -56,6 +56,19 @@ const SECURITY_CHAIN_MAX_LEN: c_int = 2;
 /// while preventing abuse.
 const CRL_MAX_REDIRECTIONS: usize = 10;
 
+/// Maximum timeout duration for CRL (Certificate Revocation List) downloads.
+///
+/// This timeout applies to individual CRL download operations to prevent
+/// indefinite blocking when fetching revocation information from remote servers.
+///
+/// # Value
+///
+/// Set to 10 seconds, which provides a reasonable balance between:
+/// - Allowing sufficient time for legitimate CRL downloads over slow networks
+/// - Preventing excessive delays in certificate verification workflows
+/// - Protecting against unresponsive or malicious CRL distribution points
+const CRL_TIMEOUT_MAX: Duration = Duration::from_secs(10);
+
 /// Verifies that the HKD
 /// * has enough security bits
 /// * is inside its validity period
@@ -471,10 +484,7 @@ fn download_first_crl_from_x509_impl<H: HttpClient>(
     cert: &X509Ref,
     mut client: H,
 ) -> Result<Option<Vec<openssl::x509::X509Crl>>> {
-    use std::time::Duration;
-
     use crate::utils::read_crls;
-    const CRL_TIMEOUT_MAX: Duration = Duration::from_secs(3);
 
     'outer: for dist_point_url in x509_dist_points(cert) {
         // Validate protocol BEFORE attempting download
