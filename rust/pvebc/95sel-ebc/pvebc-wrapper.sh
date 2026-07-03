@@ -20,6 +20,12 @@ if [[ $(cat $SYSFS) -ne 1 ]]; then
 fi
 echo "Running in SEL guest."
 
+# Check SICS existence
+if [[ ! -d "${SICS}" ]]; then
+	echo "${SICS} does not exist"
+	exit 1
+fi
+
 # Copy EBC resources from /boot/sics to tmpfs for security
 # This protects against host injection attacks by moving resources to UV-protected RAM
 echo "Copying EBC resources from $SICS to $EBC_TMPFS"

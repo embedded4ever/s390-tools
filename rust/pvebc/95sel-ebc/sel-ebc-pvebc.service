@@ -17,7 +17,6 @@ After=sel-ebc-boot-mount.service
 DefaultDependencies=no
 # Make absolutely sure this only runs in initramfs
 ConditionPathExists=/etc/initrd-release
-AssertPathIsDirectory=/boot/sics
 ConditionKernelCommandLine=rd.sel-ebc
 
 [Service]
