@@ -12,7 +12,7 @@ from cryptography.x509.oid import NameOID
 ONE_DAY = datetime.timedelta(1, 0, 0)
 
 
-def createEcKeyPair(curve=ec.SECP521R1):
+def createEcKeyPair(curve=ec.SECP521R1()):
     return ec.generate_private_key(curve=curve, backend=default_backend())
 
 
@@ -72,8 +72,8 @@ def createCert(
     pub_key=None,
 ):
     sha = hashes.SHA256
-    not_before = not_before or datetime.datetime.utcnow()
-    not_after = not_after or datetime.datetime.utcnow() + datetime.timedelta(
+    not_before = not_before or datetime.datetime.now(datetime.UTC)
+    not_after = not_after or datetime.datetime.now(datetime.UTC) + datetime.timedelta(
         days=365 * 365
     )
     crl_dp = None
