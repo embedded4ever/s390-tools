@@ -331,7 +331,8 @@ pub fn download_first_crl_from_x509(cert: &X509Ref) -> Result<Option<Vec<openssl
         handle.timeout(CRL_TIMEOUT_MAX)?;
         handle.useragent("s390-tools-pv-crl")?;
 
-        if handle.perform().is_err() {
+        if let Err(err) = handle.perform() {
+            debug!("Failed to download CRL: {}", err);
             continue;
         }
         match read_crls(&handle.get_ref().0) {
