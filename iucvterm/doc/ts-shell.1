@@ -1,9 +1,8 @@
+.\" SPDX-License-Identifier: MIT
+.\"
 .\" ts-shell.1
 .\"
-.\"
-.\" Copyright IBM Corp. 2008, 2017
-.\" s390-tools is free software; you can redistribute it and/or modify
-.\" it under the terms of the MIT license. See LICENSE for details.
+.\" Copyright IBM Corp.
 .\" ----------------------------------------------------------------------
 .TH "ts-shell" "1" "March 2009" "s390-tools" "Terminal Server over IUCV"
 .
@@ -268,6 +267,10 @@ The \fBtranscript-directory\fP option specifies a directory where the terminal
 session transcripts are saved.
 
 See section "Configure terminal session transcripts" for details.
+.
+.TP
+.BR pager " = " \fI/usr/bin/less\fP
+Specifies the path to a pager program to paginate output of ts-shell commands.
 .
 .RE
 .
@@ -541,14 +544,6 @@ Directory for saving terminal session transcripts.
 .
 .
 .SH "ENVIRONMENT"
-.TP
-.B PAGER
-The \fBPAGER\fP environment variable designates a program used as pager for the
-\fBlist\fP command of the terminal server shell.
-If \fBPAGER\fP is not set or empty,
-.BR less (1)
-is used.
-.
 .TP
 .B LESSSECURE
 \fBts-shell\fP sets this variable to run

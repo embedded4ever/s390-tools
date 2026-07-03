@@ -2,6 +2,12 @@
 #
 # See ts-shell(1) manual page for file format syntax.
 
+# Generic settings
+# ----------------
+
+# pager
+#	binary to paginate output (default: less)
+#pager = /usr/bin/less
 
 # System and authorization settings
 # ---------------------------------

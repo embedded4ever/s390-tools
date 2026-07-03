@@ -21,7 +21,6 @@ use POSIX;
 $ENV{'PERL_RL'} = " o=0";   # use best avail. readline
 $ENV{'PATH'} = "/bin:/sbin:/usr/bin:/usr/sbin";
 $ENV{'LESSSECURE'} = 1;     # let less run in "secure" mode
-$ENV{'PAGER'} = $ENV{'PAGER'} || "/usr/bin/less";
 my $ts_shell = fileparse($0, qr/\.[^.]+/);
 $SIG{__WARN__} = sub { print STDERR "$ts_shell: $_[0]"; };
 $SIG{__DIE__}  = sub { print STDERR "$ts_shell: $_[0]"; exit 255; };
@@ -36,6 +35,7 @@ my %config = (
 	'auditdir'	=>	"@var_path@/log/ts-shell",
 	'iucvconn'	=>	"@iucvconn_path@/iucvconn",
 	'prompt'	=>	getpwuid($>) . '@'."$ts_shell> ",
+	'pager'		=>	"/usr/bin/less",
 	# runtime options
 	'rl'		=>	undef,		# terminal readline (rl)
 	'user'		=>	getpwuid($>),	# user name
@@ -190,6 +190,7 @@ sub updateConfiguration(\%$)
 	$cfg->{authfile}  = $value if $option =~ /^ts-authorization$/;
 	$cfg->{auditdir}  = $value if $option =~ /^transcript-directory$/;
 	$cfg->{auditfile} = $value if $option =~ /^transcript-systems$/;
+	$cfg->{pager}     = $value if $option =~ /^pager$/;
 }
 
 # loadAuthorization() - Load system authorizations from file
@@ -545,7 +546,7 @@ sub pager($)
 {
 	my $eval = shift();
 
-	unless (open(PAGER, "|$ENV{'PAGER'}")) {
+	unless (open(PAGER, '|-', "$config{'pager'}")) {
 		eval &$eval;
 		return;
 	}
