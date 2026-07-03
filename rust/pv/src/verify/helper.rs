@@ -482,9 +482,7 @@ pub fn armonk_locality_fixup(subject: &X509NameRef) -> Option<X509Name> {
 }
 
 #[cfg(test)]
-/// tests for some private functions
-mod test {
-
+mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::*;
