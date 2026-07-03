@@ -179,6 +179,8 @@ pub enum HkdVerifyErrorType {
     IbmSignInvalid(#[source] openssl::x509::X509VerifyResult, u32),
     #[error("Too many redirections during CRL download")]
     TooManyRedirectionsCrlDownload,
+    #[error("CRL download exceeds maximum file size of {} MiB", .0 / (1024 * 1024))]
+    CrlDownloadTooLarge(u64),
     #[error("CRL download failed")]
     CrlDownloadFailed,
 }

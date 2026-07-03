@@ -354,6 +354,7 @@ trait HttpClient {
     fn follow_location(&mut self, enable: bool) -> Result<()>;
     fn redirect_url(&self) -> Result<Option<String>>;
     fn get_ref(&self) -> &[u8];
+    fn max_filesize(&mut self, size: u64) -> Result<()>;
 }
 
 /// Production HTTP client implementation
@@ -392,8 +393,13 @@ mod prod_client {
         }
 
         fn perform(&mut self) -> Result<()> {
-            self.handle.perform()?;
-            Ok(())
+            match self.handle.perform() {
+                Ok(()) => Ok(()),
+                Err(err) if err.is_filesize_exceeded() => {
+                    Err(Error::HkdVerify(CrlDownloadTooLarge(CRL_FILE_SIZE_MAX)))
+                }
+                Err(err) => Err(err.into()),
+            }
         }
 
         fn get(&mut self, enable: bool) -> Result<(), Error> {
@@ -424,6 +430,11 @@ mod prod_client {
         fn redirect_url(&self) -> Result<Option<String>> {
             Ok(self.handle.redirect_url()?.map(|s| s.to_string()))
         }
+
+        fn max_filesize(&mut self, size: u64) -> Result<()> {
+            self.handle.max_filesize(size)?;
+            Ok(())
+        }
     }
 
     /// Searches for CRL Distribution points and downloads the CRL. Stops after the first successful
@@ -447,6 +458,8 @@ mod prod_client {
         download_first_crl_from_x509_impl(cert, CurlHttpClient::new(1200))
     }
 }
+
+const CRL_FILE_SIZE_MAX: u64 = 10 * 1024 * 1024; // 10 MiB
 
 /// Searches for CRL Distribution points and downloads the CRL. Stops after the first successful
 /// download.
@@ -477,6 +490,7 @@ fn download_first_crl_from_x509_impl<H: HttpClient>(
         // redirections.
         client.follow_location(false)?;
         client.timeout(CRL_TIMEOUT_MAX)?;
+        client.max_filesize(CRL_FILE_SIZE_MAX)?;
         client.useragent("s390-tools-pv-crl")?;
 
         for i in 0..CRL_MAX_REDIRECTIONS {
@@ -649,6 +663,7 @@ mod tests {
         url: String,
         responses: HashMap<String, MockResponse>,
         perform_count: usize,
+        max_filesize: Option<u64>,
     }
 
     impl MockHttpClient {
@@ -657,6 +672,7 @@ mod tests {
                 url: String::new(),
                 responses,
                 perform_count: 0,
+                max_filesize: None,
             }
         }
     }
@@ -692,6 +708,12 @@ mod tests {
         fn perform(&mut self) -> Result<()> {
             self.perform_count += 1;
             if let Some(response) = self.responses.get(&self.url) {
+                if self
+                    .max_filesize
+                    .is_some_and(|max_filesize| response.data.len() as u64 > max_filesize)
+                {
+                    return Err(Error::HkdVerify(CrlDownloadTooLarge(CRL_FILE_SIZE_MAX)));
+                }
                 if response.should_fail {
                     bail_hkd_verify!(CrlDownloadFailed);
                 }
@@ -715,6 +737,11 @@ mod tests {
             } else {
                 &[]
             }
+        }
+
+        fn max_filesize(&mut self, size: u64) -> Result<()> {
+            self.max_filesize = Some(size);
+            Ok(())
         }
     }
 
@@ -1183,6 +1210,69 @@ mod tests {
                 result,
                 Err(Error::HkdVerify(TooManyRedirectionsCrlDownload))
             ));
+        }
+    }
+
+    mod max_filesize {
+        use super::*;
+        use crate::test_utils::get_cert_asset_path;
+
+        #[test]
+        fn download_just_over_max_filesize() {
+            testing_logger::setup();
+
+            let cert = create_cert_with_crl_dps(&["http://example.com/test.crl"]);
+
+            // Create data just over the 10 MiB limit
+            let over_limit_data = vec![0u8; 10 * 1024 * 1024 + 1];
+
+            let mut responses = HashMap::new();
+            responses.insert(
+                "http://example.com/test.crl".to_string(),
+                mock_response(over_limit_data),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            // When file size exceeds limit, the download fails and function tries next URL
+            // Since there's only one URL, it returns Ok(None) after exhausting all options
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_none());
+
+            // Verify that error was logged about file size exceeding limit
+            testing_logger::validate(|captured_logs| {
+                assert!(
+                    captured_logs
+                        .iter()
+                        .any(|log| { log.body.contains("CRL download exceeds maximum file size") }),
+                    "Expected log message about CRL file size exceeding maximum limit"
+                );
+            });
+        }
+
+        #[test]
+        fn download_fallback_after_size_exceeded() {
+            let cert = create_cert_with_crl_dps(&[
+                "http://primary.example.com/test.crl",
+                "http://backup.example.com/test.crl",
+            ]);
+            let crl_data = std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap();
+
+            let mut responses = HashMap::new();
+            // First URL has file that's too large
+            responses.insert(
+                "http://primary.example.com/test.crl".to_string(),
+                mock_response(vec![0u8; (CRL_FILE_SIZE_MAX + 1).try_into().unwrap()]),
+            );
+            // Second URL has valid CRL
+            responses.insert(
+                "http://backup.example.com/test.crl".to_string(),
+                mock_response(crl_data),
+            );
+
+            let result = download_with_mock(&cert, responses);
+            // Should fall back to second URL and succeed
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_some());
         }
     }
 }
