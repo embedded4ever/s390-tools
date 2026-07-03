@@ -79,7 +79,7 @@ impl<'a> BinReqValues<'a> {
         let rql = hdr.rql.get() as usize;
         let sea = hdr.sea.get() as usize;
 
-        if rql < req.len() || sea + Self::TAG_LEN > rql {
+        if req.len() < rql || sea + Self::TAG_LEN > rql {
             return Err(Error::BinRequestSmall);
         }
         let aad_size = rql - sea - Self::TAG_LEN;
@@ -261,5 +261,19 @@ mod tests {
             0, 0, 0, 44, // sea
         ];
         assert_eq!(hdr_bin, &hdr_bin_exp);
+    }
+
+    #[test]
+    fn bin_req_values_buffer_too_small() {
+        // Create a valid header with request length set to 200 bytes
+        let hdr = RequestHdr::new(0x200, 200, [0x11; 12], 1, 32, Some(TEST_MAGIC));
+        let hdr_bin = hdr.as_bytes();
+
+        // Create a buffer that's smaller than the declared request length (48
+        // bytes)
+        let small_buffer = Vec::from(hdr_bin);
+
+        let result = BinReqValues::get(&small_buffer);
+        assert!(matches!(result, Err(Error::BinRequestSmall)));
     }
 }
