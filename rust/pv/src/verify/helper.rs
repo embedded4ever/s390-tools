@@ -718,8 +718,12 @@ mod tests {
         // Build mock responses for each distribution point
         let mut responses = HashMap::new();
         for dist_point in dist_points {
-            // Treat distribution point as filename
-            let path = get_cert_asset_path(&dist_point);
+            // Treat distribution point as filename, remove the "http://" prefix
+            let dist_point_path = dist_point
+                .strip_prefix("http://")
+                .unwrap_or(&dist_point)
+                .to_string();
+            let path = get_cert_asset_path(&dist_point_path);
 
             if let Ok(crl_data) = std::fs::read(&path) {
                 responses.insert(dist_point, mock_response(crl_data));

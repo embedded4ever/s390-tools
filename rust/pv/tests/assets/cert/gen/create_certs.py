@@ -216,7 +216,7 @@ def getPrivKey(path, create_priv_key):
 
 
 if __name__ == "__main__":
-    MOCKUP_CRL_DIST = ""
+    MOCKUP_CRL_DIST = "http://"
 
     # create root CA
     root_ca_subject = x509.Name(

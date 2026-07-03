@@ -54,7 +54,7 @@ fn verify_chain_offline() {
 fn dist_points() {
     let crt = load_gen_cert("ibm.crt");
     let res = x509_dist_points(&crt);
-    let exp = vec!["inter_ca.crl"];
+    let exp = vec!["http://inter_ca.crl"];
     assert_eq!(res, exp);
 }
 
