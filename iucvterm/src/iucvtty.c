@@ -123,6 +123,9 @@ static int iucvtty_worker(int client, int master, int slave,
 		exit(3);	/* we only reach here if exec has failed */
 	}
 
+	/* Close slave fd to properly handle SIGHUP for the child process */
+	close(slave);
+
 	/* setup buffers */
 	msg = malloc(MSG_BUFFER_SIZE);
 	if (msg == NULL) {
