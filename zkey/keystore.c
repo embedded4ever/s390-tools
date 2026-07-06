@@ -4665,7 +4665,7 @@ struct crypt_info {
  *
  * @param[in] keystore   the keystore (not used here)
  * @param[in] volume     the volume to mount
- * @param[in] dmname     the debice mapper name
+ * @param[in] dmname     the device mapper name
  * @param[in] cipher_spec the cipher specification
  * @param[in] key_file_name the key file name
  * @param[in] key_file_size the size of the key file in bytes
@@ -4932,7 +4932,7 @@ out:
  *
  * @param[in] keystore   the keystore (not used here)
  * @param[in] volume     the volume to mount
- * @param[in] dmname     the debice mapper name
+ * @param[in] dmname     the device mapper name
  * @param[in] cipher_spec the cipher specification
  * @param[in] key_file_name the key file name
  * @param[in] key_file_size the size of the key file in bytes
