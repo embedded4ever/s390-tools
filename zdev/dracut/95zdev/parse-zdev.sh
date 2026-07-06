@@ -41,9 +41,19 @@ if [ $zdev_auto -eq 1 ] ; then
     chzdev --import "$zdev_fw_file" $zdev_base_args
 
     # Get information about DPM environment
-    for line in $($zdev_id) ; do
-        eval "$line"
-    done
+    tmp="/tmp/zdev_id.env"
+    if "$zdev_id" >"$tmp"; then
+        while IFS='=' read -r key val; do
+            case "$key" in
+            ZDEV_*)
+                val=${val#\"}
+                val=${val%\"}
+                export "$key=$val"
+                ;;
+            esac
+        done <"$tmp"
+    fi
+    rm -f "$tmp"
 
     if [ "$ZDEV_IS_DPM,$ZDEV_NEST_LEVEL,$ZDEV_HYPERVISOR_0" = "1,1,LPAR" ] ; then
       # Manually iterate over existing PCI devices - there is a udev rule

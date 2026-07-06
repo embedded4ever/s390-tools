@@ -13,6 +13,7 @@
 #include <string.h>
 #include <ctype.h>
 
+#include "sanitize.h"
 #include "zdev.h"
 #include "zdev_id.h"
 
@@ -69,6 +70,7 @@ static void process_sysinfo(const char *filename)
 			free(substr);
 		} else if (sscanf(line, "VM%*d Control Program: %ms ",
 				  &substr) == 1) {
+			sanitize(substr, VALID_CPNAME);
 			array_add(&cps, &num_cps, substr);
 			free(substr);
 		}
