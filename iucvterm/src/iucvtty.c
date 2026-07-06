@@ -17,6 +17,7 @@
 #include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <syslog.h>
@@ -63,6 +64,36 @@ static int exec_login_prog(char *cmd[])
 }
 
 /**
+ * receive_term_env() - receive terminal environment with timeout
+ * @term:     Terminal environment variable
+ * @len:      Maximum characters for the terminal environment variable
+ */
+static void receive_term_env(int client, char *term, size_t len)
+{
+	struct timeval tv = { .tv_sec = 0, .tv_usec = 0};
+
+	/* Set a temporary timeout of 10s to time out a stalling
+	 * client connection. Use SO_RCVTIMEO to set the timeout.
+	 * Using those hard coded values directly is safe as
+	 * SO_RCVTIMEO is not being used in other parts of iucvtty.
+	 */
+	tv.tv_sec = 10;
+	setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+	memset(term, 0, len);
+	if (iucvtty_rx_termenv(client, term, len))
+		snprintf(term, len, "%s", TERM_DEFAULT);
+
+	tv.tv_sec = 0;
+	setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+	if (!is_term_valid(term, len)) {
+		print_error("Ignoring received TERM env due to invalid character(s)");
+		snprintf(term, len, "%s", TERM_DEFAULT);
+	}
+}
+
+/**
  * iucvtty_worker() - Handle an incoming client connection
  * @client:	Client file descriptor
  * @master:	PTY master file descriptor
@@ -88,14 +119,7 @@ static int iucvtty_worker(int client, int master, int slave,
 	tcflush(master, TCIOFLUSH);
 
 	/* read and validate terminal parameters from client */
-	memset(term_env, 0, sizeof(term_env));
-	if (iucvtty_rx_termenv(client, term_env, MAX_TERM_SIZE))
-		snprintf(term_env, sizeof(term_env), "%s", TERM_DEFAULT);
-
-	if (!is_term_valid(term_env, sizeof(term_env))) {
-		print_error("Ignoring received TERM env due to invalid character(s)");
-		snprintf(term_env, sizeof(term_env), "%s", TERM_DEFAULT);
-	}
+	receive_term_env(client, term_env, sizeof(term_env));
 
 	/* start login program */
 	child = fork();
