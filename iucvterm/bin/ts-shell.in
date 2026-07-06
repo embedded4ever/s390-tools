@@ -430,7 +430,7 @@ sub cmd_connect($\%)
 	}
 
 	my ($guest, $srv) = split /\s+/, $params;
-	$service = $srv if $srv && $srv =~ /\w{1,8}/;
+	$service = $srv if $srv && $srv =~ /^\w{1,8}$/;
 
 	# check authorization:
 	# The auth_func contract is to return a code, that must be one of:
@@ -496,7 +496,7 @@ sub cmd_service($\%)
 		return;
 	}
 
-	if ($new =~ /\w{1,8}/) {
+	if ($new =~ /^\w{1,8}$/) {
 		$cfg->{service} = $new;
 		# push new service for cmd completion
 		unless (grep /$new/, @{$cfg->{services}}) {
