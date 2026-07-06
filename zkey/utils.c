@@ -413,7 +413,10 @@ static int parse_cca_mk_info(char *line, struct mk_info *mk_info)
 	if (sscanf(tok, "%llx", &mkvp) != 1)
 		return -EIO;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
 	memcpy(mk_reg->mkvp, &mkvp, sizeof(mkvp));
+#pragma GCC diagnostic pop
 
 	return 0;
 }
