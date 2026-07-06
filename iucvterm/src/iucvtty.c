@@ -262,8 +262,13 @@ int main(int argc, char *argv[])
 	}
 
 	/* set close-on-exec for file descriptors */
-	fcntl(master, F_SETFD, FD_CLOEXEC);
-	fcntl(server, F_SETFD, FD_CLOEXEC);
+	if (fcntl(master, F_SETFD, FD_CLOEXEC) ||
+	    fcntl(server, F_SETFD, FD_CLOEXEC)) {
+		print_error("Setting file controls failed");
+		close(server);
+		rc = 1;
+		goto exit_on_error;
+	}
 
 	/* syslog */
 	openlog(SYSLOG_IDENT, LOG_PID, LOG_AUTHPRIV);
@@ -276,6 +281,7 @@ int main(int argc, char *argv[])
 	client = accept(server, (struct sockaddr *) &caddr, &len);
 	if (client == -1) {
 		print_error("An incoming connection could not be accepted");
+		close(server);
 		rc = 2;
 		goto exit_on_error;
 	}
@@ -292,10 +298,14 @@ int main(int argc, char *argv[])
 	} else { /* client is allowed to connect */
 		syslog(LOG_INFO, "Accepted client connection from %s",
 			client_host);
-		/* set close-on-exec for client socket */
-		fcntl(client, F_SETFD, FD_CLOEXEC);
 		/* close server socket */
 		close(server);
+		/* set close-on-exec for client socket */
+		if (fcntl(client, F_SETFD, FD_CLOEXEC)) {
+			print_error("Setting file controls failed");
+			rc = 4;
+			goto exit_on_error;
+		}
 
 		/* setup signal handler to notify shutdown signal */
 		sigemptyset(&sigact.sa_mask);
