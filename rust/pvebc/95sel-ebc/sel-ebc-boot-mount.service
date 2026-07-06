@@ -9,6 +9,9 @@ DefaultDependencies=no
 # Make absolutely sure this only runs in initramfs
 ConditionPathExists=/etc/initrd-release
 ConditionKernelCommandLine=rd.sel-ebc
+Requires=systemd-udev-settle.service
+After=systemd-udev-settle.service
+After=systemd-udevd.service
 
 [Service]
 Type=oneshot
