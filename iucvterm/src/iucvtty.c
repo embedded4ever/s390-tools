@@ -32,7 +32,6 @@
 
 #define SYSLOG_IDENT		"iucvtty"
 #define PRG_COMPONENT           SYSLOG_IDENT
-#define TERM_BUFSIZE		256
 #define TERM_DEFAULT		"linux"
 
 
@@ -82,7 +81,7 @@ static int iucvtty_worker(int client, int master, int slave,
 	pid_t child;
 	fd_set set;
 	size_t chunk;
-	char term_env[TERM_BUFSIZE];
+	char term_env[MAX_TERM_SIZE];
 
 
 	/* flush pending terminal data */
@@ -90,7 +89,7 @@ static int iucvtty_worker(int client, int master, int slave,
 
 	/* read and validate terminal parameters from client */
 	memset(term_env, 0, sizeof(term_env));
-	if (iucvtty_rx_termenv(client, term_env, TERM_BUFSIZE))
+	if (iucvtty_rx_termenv(client, term_env, MAX_TERM_SIZE))
 		snprintf(term_env, sizeof(term_env), "%s", TERM_DEFAULT);
 
 	if (!is_term_valid(term_env, sizeof(term_env))) {

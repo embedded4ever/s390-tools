@@ -145,14 +145,16 @@ int iucvtty_tx_termenv(int dest, char *dflt)
 
 	len = 0;
 	if (term != NULL)
-		len = 1 + strlen(term);
+		len = MIN(1 + strlen(term), (size_t)MAX_TERM_SIZE);
 
 	/* Note: The server console tool waits for terminal environment
 	 *       information: the message is sent even if it is empty */
 	msg = msg_alloc(MSG_TYPE_TERMENV, len);
 	if (msg == NULL)
 		return -1;
-	msg_cpy_from(msg, term, len);
+	msg->datalen = len;
+	if (msg->datalen)
+		snprintf((char *)msg->data, msg->datalen, "%s", term);
 	rc = iucvtty_write_msg(dest, msg);
 	msg_free(msg);
 
@@ -354,6 +356,44 @@ static int iucvtty_read_msg_chunk(int fd, struct iucvtty_msg *msg,
 }
 
 /**
+ * validate_msg() - Perform sanity checks on a received message
+ * @msg:	IUCV message buffer
+ *
+ * Returns zero if the message is valid; otherwise non-zero
+ */
+static int validate_msg(struct iucvtty_msg *msg)
+{
+	switch (msg->type) {
+	case MSG_TYPE_DATA:
+		/* The datalen ranges from 0 to its maximum of 0xffff
+		 * which is the maximum of the type definition of uint16_t.
+		 *
+		 * Consider the datalen value as valid.
+		 */
+		break;
+	case MSG_TYPE_ERROR:
+		if (msg->datalen != sizeof(uint32_t))
+			return 1;
+		break;
+	case MSG_TYPE_TERMENV:
+		if (msg->datalen > MAX_TERM_SIZE)
+			return 1;
+		break;
+	case MSG_TYPE_TERMIOS:	/* ignored */
+		break;
+	case MSG_TYPE_WINSIZE:
+		if (msg->datalen != sizeof(struct winsize))
+			return 1;
+		break;
+	default:
+		/* Invalid message type */
+		return 1;
+	}
+
+	return 0;
+}
+
+/**
  * iucvtty_read_msg() - Read/Receive an IUCV message
  * @fd:		File descriptor to read from
  * @msg:	Pointer to IUCV message buffer
@@ -408,6 +448,16 @@ int iucvtty_read_msg(int fd, struct iucvtty_msg *msg,
 	/* Check for an empty message */
 	if (!msg->datalen)
 		return 0;
+
+	/* Check message type and data length */
+	if (validate_msg(msg)) {
+		fprintf(stderr, _("%s: %s\n"),
+			PRG_COMPONENT, _("The received message is invalid"));
+		fprintf(stderr, "MSG: msg->version=%u msg->type=%u msg->datalen=%u\n",
+			msg->version, msg->type, msg->datalen);
+		rc = -3;
+		goto out_read_error;
+	}
 
 	/* Process the new message as a one chunk */
 	*chunk = msg->datalen;

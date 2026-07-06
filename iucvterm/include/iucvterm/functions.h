@@ -21,6 +21,9 @@
 /* Message buffer: message header + 4096 bytes of data */
 #define MSG_BUFFER_SIZE		(MSG_DATA_OFFSET + (4096))
 
+/* Message data sizes */
+#define MAX_TERM_SIZE		256
+
 /* Error macros */
 #define print_error(s)		program_error(PRG_COMPONENT, (s))
 #define iucvtty_error(m)					\
