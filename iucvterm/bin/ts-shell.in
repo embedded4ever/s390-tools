@@ -237,7 +237,7 @@ sub loadAuthorization(\%)
 
 		} elsif ($key =~ /^@(\S+)$/) {
 			my $group = $1;
-			$authorized = 1 if grep {/^${group}$/} @{$cfg->{groups}};
+			$authorized = 1 if grep {/^\Q${group}\E$/} @{$cfg->{groups}};
 			log_debug "Found group: $key" if $authorized;
 		}
 
@@ -406,7 +406,15 @@ sub get_auditlog_file($$$)
 		}
 	}
 
-	$$filepath  = "$cfg->{auditdir}/$cfg->{user}/" . uc $guest . "_";
+	# validate and sanitize guest directory
+	$guest = uc $guest;
+	unless ($guest =~ /^([A-Z0-9@#\$_-]{1,8})$/) {
+		log_error "Creating session file path failed for guest: $guest";
+		return 0;     # return error
+	}
+
+	# construct the file path
+	$$filepath  = "$cfg->{auditdir}/$cfg->{user}/" . $guest . "_";
 	$$filepath .= strftime '%F-%H%M%S', localtime;
 
 	log_debug "Session transcript file: $$filepath";
