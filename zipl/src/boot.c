@@ -30,12 +30,12 @@
 /* Import a binary file */
 /* clang-format off */
 #define DATA_NAME(SYM, SUFFIX) _binary_##SYM##_bin##SUFFIX
-#define DATA_SIZE(SYM)	       ((size_t)(&DATA_NAME(SYM, _end) - &DATA_NAME(SYM, _start)))
+#define DATA_SIZE(SYM)	       ((size_t)(DATA_NAME(SYM, _end) - DATA_NAME(SYM, _start)))
 #define DATA_ADDR(SYM)	       (&DATA_NAME(SYM, _start))
 #define BIN_FILE_PATH(FILE_NAME) STRINGIFY(BUILD_PATH) "/" STRINGIFY(FILE_NAME) ".bin"
 #define IMPORT_DATA(SYM)						\
-	extern const uint8_t DATA_NAME(SYM, _start);			\
-	extern const uint8_t DATA_NAME(SYM, _end);			\
+	extern const uint8_t DATA_NAME(SYM, _start)[];			\
+	extern const uint8_t DATA_NAME(SYM, _end)[];			\
 	asm(".section \".rodata\", \"a\", @progbits\n"			\
 	    ".balign 4\n"						\
 	    ".global " STRINGIFY(DATA_NAME(SYM, _start)) "\n"		\
