@@ -8,6 +8,7 @@
  * s390-tools is free software; you can redistribute it and/or modify
  * it under the terms of the MIT license. See LICENSE for details.
  */
+#include <assert.h>
 #include <ctype.h>
 #include <errno.h>
 #include <regex.h>
@@ -37,7 +38,7 @@
  * @len:	Buffer length
  *
  * Write @len number of bytes from the buffer @buf to the file
- * descriptor @fd. The routines handles EINTR and partially writes.
+ * descriptor @fd. The routine handles EINTR and partial writes.
  * Returns the error code from the underlying write(2) syscall.
  */
 ssize_t __write(int fd, const void *buf, size_t len)
@@ -54,6 +55,33 @@ ssize_t __write(int fd, const void *buf, size_t len)
 		written += rc;
 	}
 	return written;
+}
+
+/**
+ * __read() - Read data
+ * @fd:		File descriptor
+ * @buf:	Pointer to data buffer
+ * @len:	Buffer size
+ *
+ * Read up to @len number of bytes from file descriptor @fd and stores them
+ * in the buffer to which @buf points.
+ * The routine handles EINTR and partial reads and returns the error code
+ * from the underlying read(2) syscall.
+ */
+ssize_t __read(int fd, void *buf, size_t len)
+{
+	ssize_t rc;
+	size_t count = 0;
+
+	while (count < len) {
+		rc = read(fd, buf + count, len - count);
+		if (rc == -1 && errno == EINTR)
+			continue;
+		if (rc <= 0)
+			return rc;
+		count += rc;
+	}
+	return count;
 }
 
 #ifdef __DEBUG__
@@ -147,7 +175,7 @@ int iucvtty_rx_termenv(int fd, void *buf, size_t len)
 		return -1;
 	skip = 0;
 	rc = iucvtty_read_msg(fd, msg, msg_size(msg), &skip);
-	iucvtty_skip_msg_residual(fd, &skip);
+	iucvtty_skip_msg_chunk(fd, &skip);
 	if (!rc) {
 		if (msg->datalen == 0) {
 			memset(buf, 0, MIN(1u, len));
@@ -265,93 +293,127 @@ int iucvtty_copy_data(int dest, struct iucvtty_msg *msg)
 }
 
 /**
- * iucvtty_skip_msg_residual() - Skip (receive & forget) count number of bytes
+ * iucvtty_skip_msg_chunk() - Skip (receive & forget) count number of bytes
  * @fd:		File descriptor
- * @residual:	Residual of an iucv tty message received by iucvtty_read_msg()
+ * @chunk:	Remaining chunk from a previous iucvtty_read_msg() call
  *
  * See iucvtty_read_msg() for an explanation when to use this routine.
- * Note: The @residual parameter shall not be NULL.
+ * Note: The @chunk parameter must not be NULL.
  */
-void iucvtty_skip_msg_residual(int fd, size_t *residual)
+void iucvtty_skip_msg_chunk(int fd, size_t *chunk)
 {
-	char b;
-	size_t  i;
+	int r;
+	char buf[256];
 
-	if (*residual <= 0)
+	if (*chunk <= 0)
 		return;
-	for (i = 0; i < *residual; i++)
-		if (read(fd, &b, 1) <= 0)
+
+	while (*chunk) {
+		r = __read(fd, buf, MIN(sizeof(buf), *chunk));
+		if (r <= 0)
 			break;
-	*residual = 0;
+		*chunk -= r;
+	}
+
+	*chunk = 0;
+}
+
+/**
+ * iucvtty_read_msg_chunk() - Read IUCV message chunk
+ * @fd:	      File descriptor to read from
+ * @msg:      Pointer to IUCV message buffer
+ * @msglen:     IUCV message buffer size (including message header)
+ * @chunk:    Size of chunk data to read
+ *
+ * Stores new message data and calculates next chunk size if not all data
+ * could be read.  Returns zero on success, non-zero otherwise.
+ */
+static int iucvtty_read_msg_chunk(int fd, struct iucvtty_msg *msg,
+				  size_t msglen, size_t *chunk)
+{
+	ssize_t r;
+	size_t datalen;
+
+	/* Calculate message data length to read */
+	datalen = MIN(msglen - MSG_DATA_OFFSET, *chunk);
+
+	for (;;) {
+		r = read(fd, msg->data, datalen);
+		if (r == -1 && errno == EINTR)
+			continue;
+		if (r <= 0)
+			return -1;
+		break;
+	}
+
+	/* Update message and re-calculate next chunk */
+	msg->datalen = r;
+	*chunk -= r;
+
+	return 0;
 }
 
 /**
  * iucvtty_read_msg() - Read/Receive an IUCV message
  * @fd:		File descriptor to read from
  * @msg:	Pointer to IUCV message buffer
- * @len:	IUCV message data len
- * @residual:	Status to be used by next call
+ * @msglen:	IUCV message buffer size (MUST BE > MSG_DATA_OFFSET)
+ * @chunk:	Size of remaining data; must be passed on next call
  *
- * The function reads up to @len bytes from file descriptor @fd.
- * If the received message is larger than @len bytes, the @residual value
- * is set to the number of bytes remaining.
- * The function shall then be re-called to create a new message and receive
- * the next chunk of size @residual; or the remaining characters must be
- * skipped using the iucvtty_skip_msg() routine.
- * Note: The @len parameter shall be greater than MSG_DATA_OFFSET.
- *       The @residual parameter shall not be NULL.
+ * The function reads up to @len bytes from file descriptor @fd.  If the
+ * received message is larger than @len bytes, the @chunk value is set to
+ * the number of remaining bytes.  The function shall then be re-called to
+ * create a new message and receive the outstanding data.  Alternatively,
+ * call iucvtty_skip_msg_chunk() to discard remaining data.
+ *
+ * NOTE: The @len parameter must be greater than MSG_DATA_OFFSET!
+ *       The @chunk parameter must not be NULL.
  */
 int iucvtty_read_msg(int fd, struct iucvtty_msg *msg,
-		     size_t len, size_t *residual)
+		     size_t msglen, size_t *chunk)
 {
 	int rc;
 	ssize_t r;		/* number of bytes read from fd */
 
-	if (*residual)
-		len = MIN(len - MSG_DATA_OFFSET, *residual);
+	/* Ensure message buffer size can hold data and can be processed */
+	assert(msglen > MSG_DATA_OFFSET);
+	assert(chunk != NULL);
 
-	while (1) {
-		if (*residual) {
-			r = read(fd, msg->data, len);
-			if (r > 0)
-				msg->datalen = r;
-		} else
-			r = read(fd, msg, len);
+	/* Read pending message data */
+	if (*chunk)
+		return iucvtty_read_msg_chunk(fd, msg, msglen, chunk);
 
-		if (r == -1 && errno == EINTR)
-			continue;
-		if (r <= 0) {
-			rc = -1;
-			goto out_read_error;
-		}
-
-		break;	/* exit loop for a successful read */
+	/* Read message header of new message */
+	r = __read(fd, msg, MSG_DATA_OFFSET);
+	if (r <= 0) {
+		rc = -1;
+		goto out_read_error;
 	}
+
 #ifdef __DEBUG__
-	if (!*residual)
-		__dump_msg(fd, msg, 'R');
+	__dump_msg(fd, msg, 'R');
 #endif
 
-	/* (re)calculate next chunk */
-	if (*residual)
-		*residual -= msg->datalen;
-	else
-		if (msg->datalen > (r - MSG_DATA_OFFSET)) {
-			/* calculate pending msg data and update datalen */
-			*residual = msg->datalen - (r - MSG_DATA_OFFSET);
-			msg->datalen = r - MSG_DATA_OFFSET;
-		}
-
-	/* check for a sane message */
+	/* Check message header */
 	if (msg->version != MSG_VERSION) {
 		fprintf(stderr, _("%s: %s\n"),
 			PRG_COMPONENT, _("The version of the received data "
-					 "message is not supported\n"));
+					 "message is not supported"));
+		fprintf(stderr, "MSG: msg->version=%u msg->type=%u msg->datalen=%u\n",
+			msg->version, msg->type, msg->datalen);
 		rc = -2;
 		goto out_read_error;
 	}
 
-	rc = 0;
+	/* Check for an empty message */
+	if (!msg->datalen)
+		return 0;
+
+	/* Process the new message as a one chunk */
+	*chunk = msg->datalen;
+	msg->datalen = 0;
+	rc = iucvtty_read_msg_chunk(fd, msg, msglen, chunk);
+
 out_read_error:
 	return rc;
 }

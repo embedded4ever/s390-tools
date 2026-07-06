@@ -55,7 +55,7 @@ extern int iucvtty_read_data(int, struct iucvtty_msg *, size_t);
 
 extern int iucvtty_read_msg(int, struct iucvtty_msg *, size_t, size_t *);
 extern int iucvtty_write_msg(int, struct iucvtty_msg *);
-extern void iucvtty_skip_msg_residual(int, size_t *);
+extern void iucvtty_skip_msg_chunk(int, size_t *);
 
 extern ssize_t __write(int, const void*, size_t);
 
