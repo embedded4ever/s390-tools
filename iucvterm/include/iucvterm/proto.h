@@ -86,7 +86,7 @@ static inline struct iucvtty_msg *msg_alloc(uint8_t type, uint16_t size)
 {
 	struct iucvtty_msg *m;
 
-	m = malloc(size + MSG_DATA_OFFSET);
+	m = calloc(1, size + MSG_DATA_OFFSET);
 	if (m != NULL) {
 		m->version = MSG_VERSION;
 		m->type    = type;

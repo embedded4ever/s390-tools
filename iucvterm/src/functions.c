@@ -8,6 +8,7 @@
  * s390-tools is free software; you can redistribute it and/or modify
  * it under the terms of the MIT license. See LICENSE for details.
  */
+#include <ctype.h>
 #include <errno.h>
 #include <regex.h>
 #include <stdio.h>
@@ -148,10 +149,12 @@ int iucvtty_rx_termenv(int fd, void *buf, size_t len)
 	rc = iucvtty_read_msg(fd, msg, msg_size(msg), &skip);
 	iucvtty_skip_msg_residual(fd, &skip);
 	if (!rc) {
-		if (msg->datalen == 0)
+		if (msg->datalen == 0) {
 			memset(buf, 0, MIN(1u, len));
-		else
+		} else {
 			msg_cpy_to(msg, buf, len);
+			memset(buf + MIN(msg->datalen, len - 1), 0, 1);
+		}
 	}
 	msg_free(msg);
 	return rc;
@@ -499,6 +502,31 @@ int is_client_allowed(const char *client, const struct iucvterm_cfg *cfg)
 		return 0;
 
 	return strmatch(client, cfg->client_re);
+}
+
+/**
+ * is_term_valid() - Validate TERM environment value
+ * @term:	Terminal environment name to validate
+ * @len:	Maximum number of characters to validate
+ */
+int is_term_valid(const char *term, size_t len)
+{
+	const char *c;
+
+	if (term == NULL || *term == '\0')
+		return 0;
+
+	for (c = term; *c != '\0'; c++) {
+		if ((size_t)(c - term) >= len)
+			return 0;
+		if (!isalnum((unsigned char)*c) &&
+		    *c != '.' &&
+		    *c != '_' &&
+		    *c != '-')
+			return 0;
+	}
+
+	return 1;
 }
 
 /**

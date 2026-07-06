@@ -62,6 +62,7 @@ extern ssize_t __write(int, const void*, size_t);
 extern int strmatch(const char *, const char *);
 extern int is_regex_valid(const char *);
 extern int is_client_allowed(const char *, const struct iucvterm_cfg *);
+extern int is_term_valid(const char *term, size_t len);
 extern void userid_cpy(char [9], const char [8]);
 
 extern void iucv_msg_error(const char *, uint32_t);

@@ -69,6 +69,10 @@ static int exec_login_prog(char *cmd[])
  * @master:	PTY master file descriptor
  * @slave:	PTY slave file descriptor
  * @cfg:	IUCV TTY configuration structure.
+ *
+ * Unlike the HVC IUCV terminal device driver, iucvtty expects to
+ * receive the TERM environment first.  This is necessary to correctly
+ * set up the login program.
  */
 static int iucvtty_worker(int client, int master, int slave,
 			  const struct iucvterm_cfg *cfg)
@@ -84,9 +88,15 @@ static int iucvtty_worker(int client, int master, int slave,
 	/* flush pending terminal data */
 	tcflush(master, TCIOFLUSH);
 
-	/* read terminal parameters from client */
+	/* read and validate terminal parameters from client */
+	memset(term_env, 0, sizeof(term_env));
 	if (iucvtty_rx_termenv(client, term_env, TERM_BUFSIZE))
-		sprintf(term_env, TERM_DEFAULT);
+		snprintf(term_env, sizeof(term_env), "%s", TERM_DEFAULT);
+
+	if (!is_term_valid(term_env, sizeof(term_env))) {
+		print_error("Ignoring received TERM env due to invalid character(s)");
+		snprintf(term_env, sizeof(term_env), "%s", TERM_DEFAULT);
+	}
 
 	/* start login program */
 	child = fork();
