@@ -17,6 +17,7 @@
 #include "device.h"
 #include "devtype.h"
 #include "export.h"
+#include "sanitize.h"
 #include "setting.h"
 #include "subtype.h"
 
@@ -35,6 +36,8 @@ static bool header_str_to_config(const char *config_str, config_t *config)
 
 	if (strstr(config_str, "site")) {
 		if (sscanf(config_str, "site%d", &site) == 1) {
+			if (site < 0 || site >= NUM_USER_SITES)
+				return false;
 			import_site_id = site;
 			*config = config_persistent;
 			return true;
@@ -333,6 +336,8 @@ static bool parse_setting(const char *line, char **key_ptr, char **val_ptr)
 	value++;
 	*key_ptr = shrink_str(copy);
 	*val_ptr = unquote_str(value);
+	sanitize(*key_ptr, VALID_ATTRKEY);
+	sanitize(*val_ptr, VALID_ATTRVAL);
 	free(copy);
 
 	return true;
