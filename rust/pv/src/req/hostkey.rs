@@ -4,7 +4,7 @@
 
 //! Host key types for UV requests
 
-use openssl::pkey::{PKey, Public};
+use openssl::pkey::{PKey, PKeyRef, Public};
 
 /// Versioned host keys container
 #[non_exhaustive]
@@ -16,10 +16,10 @@ pub enum HostKey {
 
 impl HostKey {
     /// Return the ECDH public key
-    pub fn ec_key(&self) -> &PKey<Public> {
-        match self {
+    pub fn ec_key(&self) -> Option<&PKeyRef<Public>> {
+        Some(match self {
             HostKey::V1(ec_key) => ec_key,
-        }
+        })
     }
 }
 
