@@ -3,6 +3,8 @@
 // Copyright IBM Corp.
 
 //! Request header structure for UV requests.
+
+use pv_core::request::{RequestMagic, RequestVersion};
 use zerocopy::{BigEndian, FromBytes, Immutable, IntoBytes, U32};
 
 use crate::assert_size;
@@ -25,13 +27,13 @@ pub struct RequestHdr {
 assert_size!(RequestHdr, 48);
 
 impl RequestHdr {
-    pub(crate) fn new(
-        rqvn: u32,
+    pub(super) fn new(
+        rqvn: RequestVersion,
         rql: u32,
         iv: [u8; 12],
         nks: u8,
         sea: u32,
-        magic: Option<[u8; 8]>,
+        magic: Option<RequestMagic>,
     ) -> Self {
         Self {
             magic: magic.unwrap_or_default(),
