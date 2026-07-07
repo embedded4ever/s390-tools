@@ -21,6 +21,7 @@ pub(crate) use ec_coord::get_pub_ecdh_points;
 pub use ec_coord::EcPubKeyCoord;
 pub use encrypt::{Aad, Encrypt};
 pub use header::RequestHdr;
-pub use hostkey::HostKey;
-pub use keyslot::{Keyslot, KeyslotV1};
+pub use hostkey::{HostKey, HybridPKey};
+#[expect(unused)]
+pub use keyslot::{Keyslot, KeyslotV1, KeyslotV2};
 pub use request::{BinReqValues, Request};
