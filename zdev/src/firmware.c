@@ -31,6 +31,7 @@
 #include "misc.h"
 #include "path.h"
 #include "qeth.h"
+#include "sanitize.h"
 #include "subtype.h"
 #include "zfcp_host.h"
 #include "zfcp_lun.h"
@@ -294,6 +295,9 @@ static unsigned long parse_value(char *data, uint8_t len)
 /* Perform sanity checks on device setting. */
 static bool check_setting(struct fw_file *f, struct fw_setting *set)
 {
+	char c;
+	int i;
+
 	/* Key sanity checks */
 	if (fwacc(f, set->key_type) != FW_SETTING_KEYTYPE_ASCII) {
 		fwwarn(f, "Unsupported key type: %d", set->key_type);
@@ -310,6 +314,13 @@ static bool check_setting(struct fw_file *f, struct fw_setting *set)
 	if (fwacc(f, set->data[set->key_len - 1])) {
 		fwwarn(f, "Key not null-terminated");
 		return false;
+	}
+	for (i = 0; i < set->key_len; i++) {
+		c = fwacc(f, set->data[i]);
+		if (!is_safe_char(c, VALID_ATTRKEY)) {
+			fwwarn(f, "Key contains unsupported characters");
+			return false;
+		}
 	}
 
 	/* Value sanity checks */
@@ -331,6 +342,15 @@ static bool check_setting(struct fw_file *f, struct fw_setting *set)
 	    fwacc(f, set->data[set->key_len + set->val_len - 1])) {
 		fwwarn(f, "Value not null-terminated");
 		return false;
+	}
+	if (set->val_type == FW_SETTING_VALTYPE_ASCII) {
+		for (i = 0; i < set->val_len; i++) {
+			c = fwacc(f, set->data[set->key_len + i]);
+			if (!is_safe_char(c, VALID_ATTRVAL)) {
+				fwwarn(f, "Value contains unsupported characters");
+				return false;
+			}
+		}
 	}
 	if (set->val_type == FW_SETTING_VALTYPE_UINT) {
 		switch (fwacc(f, set->val_len)) {
@@ -401,13 +421,18 @@ static void parse_setting(struct fw_file *f, struct fw_setting *set,
 
 /* Parse a device settings list in firmware format and apply the resulting
  * settings to the specified device. */
-static void parse_settings(struct fw_file *f, char *data, struct device *dev,
-			   config_t config)
+static void parse_settings(struct fw_file *f, struct fw_dehdr *de, char *data,
+			   struct device *dev, config_t config)
 {
 	struct fw_setlist *list = (struct fw_setlist *) data;
 	struct fw_setting *set;
-	uint16_t off;
+	uint16_t off, len;
 
+	len = de->len - /* offsetof(fw_*, settings) */ (uint16_t)(data - (char *)de);
+	if (fwacc(f, list->len) > len) {
+		fwwarn(f, "Setting list too long");
+		return;
+	}
 	for (off = sizeof(struct fw_setlist); off < list->len;
 	     off += set->len) {
 		set = (struct fw_setting *) &data[off];
@@ -572,9 +597,9 @@ static void parse_dasd(struct fw_file *f, struct fw_dehdr *de, config_t config,
 
 	if (dasd->hdr.len > sizeof(struct fw_dasd)) {
 		if (dev_eckd)
-			parse_settings(f, dasd->settings, dev_eckd, config);
+			parse_settings(f, de, dasd->settings, dev_eckd, config);
 		if (dev_fba)
-			parse_settings(f, dasd->settings, dev_fba, config);
+			parse_settings(f, de, dasd->settings, dev_fba, config);
 	}
 }
 
@@ -599,7 +624,7 @@ static void parse_zfcp_host(struct fw_file *f, struct fw_dehdr *de,
 	free(id);
 
 	if (dev && zfcp_host->hdr.len > sizeof(struct fw_zfcp_host))
-		parse_settings(f, zfcp_host->settings, dev, config);
+		parse_settings(f, de, zfcp_host->settings, dev, config);
 }
 
 /* Parse a zFCP LUN device entry. */
@@ -625,7 +650,7 @@ static void parse_zfcp_lun(struct fw_file *f, struct fw_dehdr *de,
 	free(id);
 
 	if (dev && zfcp_lun->hdr.len > sizeof(struct fw_zfcp_lun))
-		parse_settings(f, zfcp_lun->settings, dev, config);
+		parse_settings(f, de, zfcp_lun->settings, dev, config);
 
 }
 
@@ -655,7 +680,7 @@ static void parse_qeth(struct fw_file *f, struct fw_dehdr *de, config_t config,
 	free(id);
 
 	if (dev && qeth->hdr.len > sizeof(struct fw_qeth))
-		parse_settings(f, qeth->settings, dev, config);
+		parse_settings(f, de, qeth->settings, dev, config);
 }
 
 /* Parse a firmware file. */

@@ -16,6 +16,12 @@
 /* Valid control-program identifier special characters */
 #define VALID_CPNAME	"/"
 
+/* Valid attribute key special characters */
+#define VALID_ATTRKEY	"/:"
+
+/* Valid attribute value special characters */
+#define VALID_ATTRVAL	"/-+:.,_ "
+
 static inline int is_safe_char(unsigned char c, const char *set)
 {
 	return isalnum(c) || strchr(set, c);
