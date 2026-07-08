@@ -85,6 +85,13 @@ if [ X${1}X == XX ] ; then
 	killall xcec-bridge
 fi
 
+# Use mktemp to rule out collisions
+cleanup1=$(mktemp /tmp/ip_watcher.XXXXXX) || exit 1
+cleanup2=$(mktemp /tmp/ip_watcher.XXXXXX) || exit 1
+
+# Ensure temp files are always removed on exit, error, or signal
+trap 'rm -f "$cleanup1" "$cleanup2"; exit' EXIT INT TERM
+
 echo removing all parp entries from mc interfaces
 if [ X${1}X == XX ] ; then
 	for DEV in $(ls /sys/devices/qeth/ | egrep '^.+\..+\..+')
@@ -92,21 +99,20 @@ if [ X${1}X == XX ] ; then
 		if_name=`cat /sys/devices/qeth/$DEV/if_name | sed 's/$/\$/'`
 		rtr=`cat /sys/devices/qeth/$DEV/route4 2> /dev/null | egrep 'multicast'`
 		if [ -n "$rtr" ] ; then
-			echo $if_name >> /tmp/ip_watcher.cleanup1
+			echo $if_name >> "$cleanup1"
 		fi
 	done
 else
-	echo ${1}$ > /tmp/ip_watcher.cleanup1
+	echo ${1}$ > "$cleanup1"
 fi
 
-qethconf rxip list | sed 's/add/del/' | egrep -f /tmp/ip_watcher.cleanup1 > /tmp/ip_watcher.cleanup2
-
+qethconf rxip list | sed 's/add/del/' | egrep -f "$cleanup1" > "$cleanup2"
 
 while read line; do
 	qethconf $line > /dev/null 2>&1
-done < /tmp/ip_watcher.cleanup2
-rm /tmp/ip_watcher.cleanup1
-rm /tmp/ip_watcher.cleanup2
+done < "$cleanup2"
+# Truncate and reuse between phases — trap stays valid throughout
+: > "$cleanup1"
 
 echo removing all routes from connector interfaces
 for DEV in $(ls /sys/devices/qeth/ | egrep '^.+\..+\..+')
@@ -114,12 +120,10 @@ do
 	if_name=`cat /sys/devices/qeth/$DEV/if_name | sed 's/$/\$/'`
 	rtr=`cat /sys/devices/qeth/$DEV/route4 2> /dev/null | egrep 'connector'`
 	if [ -n "$rtr" ] ; then
-		echo $if_name >> /tmp/ip_watcher.cleanup1
+		echo $if_name >> "$cleanup1"
 	fi
 done
-route -n | egrep -f /tmp/ip_watcher.cleanup1 > /tmp/ip_watcher.cleanup2
+route -n | egrep -f "$cleanup1" > "$cleanup2"
 while read line; do
 	route del -net `echo $line | awk '{print $1 " netmask " $3 " dev " $8}'`
-done < /tmp/ip_watcher.cleanup2
-rm /tmp/ip_watcher.cleanup1
-rm /tmp/ip_watcher.cleanup2
+done < "$cleanup2"
