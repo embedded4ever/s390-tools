@@ -84,7 +84,7 @@ out:
 
 static void get_site_from_line(char *line, int *site, bool *in_site)
 {
-	char site_str[2];
+	char site_str[3] = { 0 };
 
 	if (starts_with(line, SITE_BLOCK_START)) {
 		memcpy(site_str, line + sizeof(SITE_BLOCK_START), 2);
