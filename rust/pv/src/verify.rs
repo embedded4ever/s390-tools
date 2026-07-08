@@ -2,7 +2,6 @@
 //
 // Copyright IBM Corp. 2023
 
-use core::slice;
 use std::path::Path;
 
 use helper::{download_first_crl_from_x509, StoreSetupMode};
@@ -205,7 +204,7 @@ impl CertVerifier {
         helper::verify_chain(
             &store_builder.build(),
             &chain,
-            slice::from_ref(&ibm_z_sign_key),
+            &[&ibm_z_sign_key],
             &root_ca_verification,
         )?;
 
@@ -225,12 +224,7 @@ impl CertVerifier {
         }
 
         let store = store_builder.build();
-        helper::verify_chain(
-            &store,
-            &chain,
-            slice::from_ref(&ibm_z_sign_key),
-            &root_ca_verification,
-        )?;
+        helper::verify_chain(&store, &chain, &[&ibm_z_sign_key], &root_ca_verification)?;
 
         Ok(Self {
             store,

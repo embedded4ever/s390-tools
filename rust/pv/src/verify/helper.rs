@@ -13,7 +13,7 @@ use openssl::asn1::{Asn1Time, Asn1TimeRef};
 use openssl::error::ErrorStack;
 use openssl::nid::Nid;
 use openssl::ssl::SslFiletype;
-use openssl::stack::Stack;
+use openssl::stack::{Stack, StackRef};
 use openssl::x509::store::{File, X509Lookup, X509StoreBuilder, X509StoreRef};
 use openssl::x509::verify::{X509VerifyFlags, X509VerifyParam};
 use openssl::x509::{
@@ -209,8 +209,8 @@ fn check_x509_org_name(cert: &X509Ref, expected_org: &str) -> bool {
 /// * `root_ca_verification` - Root CA verification mode
 pub fn verify_chain(
     store: &X509StoreRef,
-    untrusted_certs: &Stack<X509>,
-    sign_keys: &[X509],
+    untrusted_certs: &StackRef<X509>,
+    sign_keys: &[&X509Ref],
     root_ca_verification: &RootCaVerification,
 ) -> Result<()> {
     fn verify_fun(
@@ -1500,7 +1500,7 @@ mod tests {
             let result = verify_chain(
                 &store,
                 &untrusted,
-                &[ibm_cert],
+                &[&ibm_cert],
                 &RootCaVerification::SkipPinning,
             );
 
@@ -1537,7 +1537,7 @@ mod tests {
             let result = verify_chain(
                 &store,
                 &untrusted,
-                &[ibm_cert],
+                &[&ibm_cert],
                 &RootCaVerification::SkipPinning,
             );
 
@@ -1576,7 +1576,7 @@ mod tests {
             let result = verify_chain(
                 &store,
                 &untrusted,
-                &[ibm_cert.clone()],
+                &[&ibm_cert.clone()],
                 &RootCaVerification::RootCaOrganizationPinning(wrong_org),
             );
 
@@ -1586,7 +1586,7 @@ mod tests {
             let result = verify_chain(
                 &store,
                 &untrusted,
-                &[ibm_cert],
+                &[&ibm_cert],
                 &RootCaVerification::RootCaOrganizationPinning(
                     "International Business Machines Corporation",
                 ),
