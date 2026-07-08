@@ -58,7 +58,33 @@ fn verify_chain_offline() {
 
     let mut sk = Stack::<X509>::new().unwrap();
     sk.push(inter_crt).unwrap();
-    assert!(verify_chain(&store, &sk, &[ibm_crt]).is_ok());
+    assert!(verify_chain(
+        &store,
+        &sk,
+        &[ibm_crt.clone()],
+        &RootCaVerification::RootCaOrganizationPinning(
+            "International Business Machines Corporationn"
+        )
+    )
+    .is_err());
+    assert!(verify_chain(
+        &store,
+        &sk,
+        &[ibm_crt.clone()],
+        &RootCaVerification::RootCaOrganizationPinning("International")
+    )
+    .is_err());
+    assert!(verify_chain(
+        &store,
+        &sk,
+        &[ibm_crt.clone()],
+        &RootCaVerification::RootCaOrganizationPinning(
+            "International Business Machines Corporation"
+        )
+    )
+    .is_ok());
+
+    assert!(verify_chain(&store, &sk, &[ibm_crt], &RootCaVerification::SkipPinning).is_ok());
 }
 
 #[test]

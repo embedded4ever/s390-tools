@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::from_utf8;
 use std::time::Duration;
 
-use log::{debug, warn};
+use log::{debug, error, warn};
 use openssl::asn1::{Asn1Time, Asn1TimeRef};
 use openssl::error::ErrorStack;
 use openssl::nid::Nid;
@@ -169,14 +169,54 @@ pub fn store_setup<P: AsRef<Path>, Q: AsRef<Path>, R: AsRef<Path>>(
     Ok(x509store_builder)
 }
 
+/// Root CA verification mode
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RootCaVerification {
+    /// Enforce specific root CA organization name requirement
+    RootCaOrganizationPinning(&'static str),
+    /// Skip root CA verification (when custom root CA is provided)
+    SkipPinning,
+}
+
+fn x509_subject_orgs(cert: &X509Ref) -> Vec<String> {
+    cert.subject_name()
+        .entries_by_nid(Nid::ORGANIZATIONNAME)
+        .filter_map(|entry| entry.data().as_utf8().ok())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Checks if the certificate subject matches the expected organization name
+///
+/// # Arguments
+/// * `cert` - The certificate chain to verify
+/// * `expected_org` - The expected organization name to match
+///
+/// # Returns
+/// * `true` if the certificate organization name equals the expected string
+/// * `false` otherwise
+fn check_x509_org_name(cert: &X509Ref, expected_org: &str) -> bool {
+    x509_subject_orgs(cert).iter().any(|s| s == expected_org)
+}
+
 /// Verify that the given IBM signing keys can be trusted
 /// -> check the chain: `IBMsignKey`<-InterCA(s)<-`RootCA`
+///
+/// # Arguments
+/// * `store` - The X509 store containing trusted certificates
+/// * `untrusted_certs` - Stack of untrusted certificates to build the chain
+/// * `sign_keys` - IBM Z signing keys to verify
+/// * `root_ca_verification` - Root CA verification mode
 pub fn verify_chain(
     store: &X509StoreRef,
     untrusted_certs: &Stack<X509>,
     sign_keys: &[X509],
+    root_ca_verification: &RootCaVerification,
 ) -> Result<()> {
-    fn verify_fun(ctx: &mut X509StoreContextRef) -> std::result::Result<bool, ErrorStack> {
+    fn verify_fun(
+        ctx: &mut X509StoreContextRef,
+        root_ca_verification: &RootCaVerification,
+    ) -> std::result::Result<bool, ErrorStack> {
         // verify certificate
         let res = ctx.verify_cert()?;
         if !res {
@@ -195,10 +235,35 @@ pub fn verify_chain(
         if chain.len() < SECURITY_CHAIN_MAX_LEN as usize {
             debug!("Verification expects one root and at least one intermediate certificate",);
             ctx.set_error(X509VerifyResult::APPLICATION_VERIFICATION);
-            Ok(false)
-        } else {
-            Ok(true)
+            return Ok(false);
         }
+
+        if let RootCaVerification::RootCaOrganizationPinning(expected_org) = root_ca_verification {
+            // The root CA is the last certificate in the chain
+            let root_ca = match chain.get(chain.len() - 1) {
+                Some(cert) => cert,
+                None => {
+                    ctx.set_error(X509VerifyResult::APPLICATION_VERIFICATION);
+                    return Ok(false);
+                }
+            };
+
+            if !check_x509_org_name(root_ca, expected_org) {
+                error!(
+                    "error: Root CA pinning failed as organization mismatch
+       expected: {}
+       found:    {}
+
+       To trust a different root CA, use '--root-ca <FILE>'.",
+                    expected_org,
+                    x509_subject_orgs(root_ca).join(", "),
+                );
+                ctx.set_error(X509VerifyResult::APPLICATION_VERIFICATION);
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     let mut store_ctx = X509StoreContext::new()?;
@@ -207,7 +272,9 @@ pub fn verify_chain(
         // (rust)OpenSSL should not error out on `X509_verify_cert`\
         // (Internal (probably unrecoverable) error like OOM)
         if !store_ctx
-            .init(store, sign_key, untrusted_certs, verify_fun)
+            .init(store, sign_key, untrusted_certs, |ctx| {
+                verify_fun(ctx, root_ca_verification)
+            })
             .map_err(|e| Error::InternalSsl("The IBM Z signing key could not be verified.", e))?
         {
             return Err(Error::HkdVerify(IbmSignInvalid(
@@ -1297,6 +1364,235 @@ mod tests {
             // Should fall back to second URL and succeed
             assert!(result.is_ok());
             assert!(result.unwrap().is_some());
+        }
+    }
+
+    mod organization_name_validation {
+        use openssl::bn::{BigNum, MsbOption};
+        use openssl::hash::MessageDigest;
+        use openssl::pkey::PKey;
+        use openssl::rsa::Rsa;
+        use openssl::x509::{X509Builder, X509NameBuilder};
+
+        use super::*;
+
+        /// Helper to create a certificate with custom organization names
+        fn create_cert_with_orgs(org_names: &[&str]) -> X509 {
+            let rsa = Rsa::generate(2048).unwrap();
+            let key_pair = PKey::from_rsa(rsa).unwrap();
+
+            let mut builder = X509Builder::new().unwrap();
+            builder.set_version(2).unwrap();
+
+            let serial = {
+                let mut num = BigNum::new().unwrap();
+                num.rand(159, MsbOption::MAYBE_ZERO, false).unwrap();
+                num.to_asn1_integer().unwrap()
+            };
+            builder.set_serial_number(&serial).unwrap();
+
+            let mut name_builder = X509NameBuilder::new().unwrap();
+            name_builder.append_entry_by_text("C", "US").unwrap();
+
+            // Add all organization names
+            for org in org_names {
+                name_builder.append_entry_by_text("O", org).unwrap();
+            }
+
+            name_builder
+                .append_entry_by_text("CN", "Test Certificate")
+                .unwrap();
+            let name = name_builder.build();
+
+            builder.set_subject_name(&name).unwrap();
+            builder.set_issuer_name(&name).unwrap();
+            builder.set_pubkey(&key_pair).unwrap();
+
+            builder
+                .set_not_before(&Asn1Time::days_from_now(0).unwrap())
+                .unwrap();
+            builder
+                .set_not_after(&Asn1Time::days_from_now(365).unwrap())
+                .unwrap();
+
+            builder.sign(&key_pair, MessageDigest::sha256()).unwrap();
+            builder.build()
+        }
+
+        #[test]
+        fn organization_name_edge_cases() {
+            // Test X.509 length limits: minimum (1 char) and maximum (64 chars)
+            let min_org = "A";
+            let max_org = "B".repeat(64);
+            let special_org = "Test & Co.";
+            let unicode_org = "日本電気株式会社";
+
+            let cert = create_cert_with_orgs(&[min_org, &max_org, special_org, unicode_org]);
+
+            assert!(check_x509_org_name(&cert, min_org));
+            assert!(check_x509_org_name(&cert, &max_org));
+            assert!(check_x509_org_name(&cert, special_org));
+            assert!(check_x509_org_name(&cert, unicode_org));
+
+            assert!(!check_x509_org_name(&cert, "AB"));
+            assert!(!check_x509_org_name(&cert, &"B".repeat(63)));
+            assert!(!check_x509_org_name(&cert, "Test"));
+            assert!(!check_x509_org_name(&cert, ""));
+        }
+
+        #[test]
+        fn multiple_organization_values() {
+            let cert = create_cert_with_orgs(&["IBM", "Red Hat"]);
+
+            assert!(check_x509_org_name(&cert, "IBM"));
+            assert!(check_x509_org_name(&cert, "Red Hat"));
+
+            assert!(!check_x509_org_name(&cert, "Microsoft"));
+        }
+
+        #[test]
+        fn organization_name_exact_matching() {
+            // Test case sensitivity and whitespace handling
+            let cert = create_cert_with_orgs(&["IBM Corporation", "IBM  Corp"]);
+
+            assert!(check_x509_org_name(&cert, "IBM Corporation"));
+            assert!(!check_x509_org_name(&cert, "ibm corporation"));
+            assert!(!check_x509_org_name(&cert, "IBM CORPORATION"));
+
+            assert!(check_x509_org_name(&cert, "IBM  Corp"));
+            assert!(!check_x509_org_name(&cert, "IBM Corp"));
+        }
+    }
+
+    mod custom_root_ca_validation {
+        use openssl::x509::verify::{X509VerifyFlags, X509VerifyParam};
+        use openssl::x509::X509Crl;
+
+        use super::*;
+        use crate::verify::X509StoreExtension;
+
+        #[test]
+        fn custom_root_ca_does_not_bypass_chain_validation() {
+            // This test verifies that providing a custom root CA (--root-ca flag)
+            // only skips organization pinning, but does NOT bypass other validation
+
+            let root_ca = load_gen_cert("root_ca.crt");
+            let fake_inter = load_gen_cert("fake_inter_ca.crt");
+            let ibm_cert = load_gen_cert("ibm.crt");
+
+            let mut store_builder = X509StoreBuilder::new().unwrap();
+            store_builder.add_cert(root_ca).unwrap();
+
+            let crl =
+                X509Crl::from_pem(&std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap())
+                    .unwrap();
+            store_builder.add_crl(&crl).unwrap();
+            let mut param = X509VerifyParam::new().unwrap();
+            param.set_flags(X509VerifyFlags::CRL_CHECK).unwrap();
+            store_builder.set_param(&param).unwrap();
+
+            let store = store_builder.build();
+
+            // Create untrusted chain with FAKE intermediate (invalid chain)
+            let mut untrusted = Stack::<X509>::new().unwrap();
+            untrusted.push(fake_inter).unwrap();
+
+            let result = verify_chain(
+                &store,
+                &untrusted,
+                &[ibm_cert],
+                &RootCaVerification::SkipPinning,
+            );
+
+            assert!(
+                result.is_err(),
+                "Custom root CA should not bypass chain validation"
+            );
+        }
+
+        #[test]
+        fn custom_root_ca_skips_organization_pinning() {
+            // This test verifies that SkipPinning mode allows any root CA organization
+
+            let root_ca = load_gen_cert("root_ca.crt");
+            let inter_ca = load_gen_cert("inter_ca.crt");
+            let ibm_cert = load_gen_cert("ibm.crt");
+
+            let mut store_builder = X509StoreBuilder::new().unwrap();
+            store_builder.add_cert(root_ca).unwrap();
+
+            let crl =
+                X509Crl::from_pem(&std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap())
+                    .unwrap();
+            store_builder.add_crl(&crl).unwrap();
+            let mut param = X509VerifyParam::new().unwrap();
+            param.set_flags(X509VerifyFlags::CRL_CHECK).unwrap();
+            store_builder.set_param(&param).unwrap();
+
+            let store = store_builder.build();
+
+            let mut untrusted = Stack::<X509>::new().unwrap();
+            untrusted.push(inter_ca).unwrap();
+
+            let result = verify_chain(
+                &store,
+                &untrusted,
+                &[ibm_cert],
+                &RootCaVerification::SkipPinning,
+            );
+
+            assert!(
+                result.is_ok(),
+                "Valid chain should succeed with SkipPinning"
+            );
+        }
+
+        #[test]
+        fn organization_pinning_enforces_expected_org() {
+            // This test verifies that organization pinning rejects wrong organizations
+
+            let root_ca = load_gen_cert("root_ca.crt");
+            let inter_ca = load_gen_cert("inter_ca.crt");
+            let ibm_cert = load_gen_cert("ibm.crt");
+
+            let mut store_builder = X509StoreBuilder::new().unwrap();
+            store_builder.add_cert(root_ca.clone()).unwrap();
+
+            let crl =
+                X509Crl::from_pem(&std::fs::read(get_cert_asset_path("inter_ca.crl")).unwrap())
+                    .unwrap();
+            store_builder.add_crl(&crl).unwrap();
+            let mut param = X509VerifyParam::new().unwrap();
+            param.set_flags(X509VerifyFlags::CRL_CHECK).unwrap();
+            store_builder.set_param(&param).unwrap();
+
+            let store = store_builder.build();
+
+            let mut untrusted = Stack::<X509>::new().unwrap();
+            untrusted.push(inter_ca).unwrap();
+
+            // With wrong organization pinning, should fail
+            let wrong_org = "Wrong Organization Name";
+            let result = verify_chain(
+                &store,
+                &untrusted,
+                &[ibm_cert.clone()],
+                &RootCaVerification::RootCaOrganizationPinning(wrong_org),
+            );
+
+            assert!(result.is_err(), "Should fail with wrong organization");
+
+            // With correct organization pinning, should succeed
+            let result = verify_chain(
+                &store,
+                &untrusted,
+                &[ibm_cert],
+                &RootCaVerification::RootCaOrganizationPinning(
+                    "International Business Machines Corporation",
+                ),
+            );
+
+            assert!(result.is_ok(), "Should succeed with correct organization");
         }
     }
 }

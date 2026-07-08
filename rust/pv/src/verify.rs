@@ -187,6 +187,10 @@ impl CertVerifier {
             untr_certs.append(&mut crt);
         }
         let (ibm_z_sign_key, chain) = helper::extract_ibm_sign_key(untr_certs.clone())?;
+        let root_ca_verification = match root_ca_path {
+            Some(_) => helper::RootCaVerification::SkipPinning,
+            None => helper::RootCaVerification::RootCaOrganizationPinning("DigiCert"),
+        };
 
         // Two-round verification:
         //
@@ -202,6 +206,7 @@ impl CertVerifier {
             &store_builder.build(),
             &chain,
             slice::from_ref(&ibm_z_sign_key),
+            &root_ca_verification,
         )?;
 
         // Round 2: Download CRLs and verify again, but this time with CRL checks
@@ -220,7 +225,12 @@ impl CertVerifier {
         }
 
         let store = store_builder.build();
-        helper::verify_chain(&store, &chain, slice::from_ref(&ibm_z_sign_key))?;
+        helper::verify_chain(
+            &store,
+            &chain,
+            slice::from_ref(&ibm_z_sign_key),
+            &root_ca_verification,
+        )?;
 
         Ok(Self {
             store,
