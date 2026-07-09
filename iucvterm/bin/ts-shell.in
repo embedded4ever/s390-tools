@@ -197,6 +197,7 @@ sub updateConfiguration(\%$)
 	$cfg->{auditdir}  = $value if $option =~ /^transcript-directory$/;
 	$cfg->{auditfile} = $value if $option =~ /^transcript-systems$/;
 	$cfg->{pager}     = $value if $option =~ /^pager$/;
+	$cfg->{iucvconn}  = $value if $option =~ /^iucvconn$/;
 
 	# Validate pager to untaint for later use
 	unless ($cfg->{pager} =~ m#^(/[\w./-]+)$#) {
@@ -204,6 +205,13 @@ sub updateConfiguration(\%$)
 		exit 6;
 	}
 	$cfg->{pager} = $1;
+
+	# Validate iucvconn path to untaint for later use
+	unless ($cfg->{iucvconn} =~ m#^(/[\w./-]+)$#) {
+		log_error "Invalid iucvconn configuration";
+		exit 7;
+	}
+	$cfg->{iucvconn} = $1;
 }
 
 # loadAuthorization() - Load system authorizations from file
