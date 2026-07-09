@@ -71,6 +71,7 @@ sub cmd_list(\%);
 sub rl_cmd_completion($$$);
 sub list_regex_match($);
 sub updateConfiguration(\%$);
+sub checkConfiguration(\%);
 sub loadAuthorization(\%);
 sub readFile($$);
 sub log_debug($);
@@ -109,6 +110,7 @@ sub main()
 			  "$config{conffile} failed: $!";
 		exit 3;
 	}
+	checkConfiguration(%config);
 
 	# load list of systems the ts-shell is allowed to use; and
 	# hash the systems names in uppercase
@@ -191,13 +193,26 @@ sub updateConfiguration(\%$)
 {
 	my ($cfg, $line) = @_;
 	my ($option, $value) = split /\s*=\s*/, $line;
-	
+
 	$cfg->{sysfile}   = $value if $option =~ /^ts-systems$/;
 	$cfg->{authfile}  = $value if $option =~ /^ts-authorization$/;
 	$cfg->{auditdir}  = $value if $option =~ /^transcript-directory$/;
 	$cfg->{auditfile} = $value if $option =~ /^transcript-systems$/;
 	$cfg->{pager}     = $value if $option =~ /^pager$/;
 	$cfg->{iucvconn}  = $value if $option =~ /^iucvconn$/;
+}
+
+# checkConfiguration() - Validate and untaint configuration values
+#
+# Called once after readFile() has finished populating %cfg from
+# ts-shell.conf.  Validates each security-sensitive path and untaints
+# it via a regex capture so Perl taint mode permits later filesystem use.
+#
+# %cfg:	Hash reference to terminal server configuration
+#
+sub checkConfiguration(\%)
+{
+	my $cfg = shift;
 
 	# Validate pager to untaint for later use
 	unless ($cfg->{pager} =~ m#^(/[\w./-]+)$#) {
