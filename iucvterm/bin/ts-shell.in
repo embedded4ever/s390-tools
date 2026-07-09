@@ -14,9 +14,15 @@ use strict;
 use warnings;
 use File::Basename;
 use Getopt::Long qw(:config no_ignore_case);
+use Scalar::Util qw(tainted);
 use Term::ReadLine;
 use POSIX;
 
+$ENV{'PERL5LIB'} = "";
+$ENV{'PERL5OPT'} = "";
+$ENV{'PERLLIB'} = "";
+$ENV{'PERL_USE_UNSAFE_INC'} = "";
+delete @ENV{qw(IFS CDPATH ENV BASH_ENV)};
 
 $ENV{'PERL_RL'} = " o=0";   # use best avail. readline
 $ENV{'PATH'} = "/bin:/sbin:/usr/bin:/usr/sbin";
@@ -191,6 +197,13 @@ sub updateConfiguration(\%$)
 	$cfg->{auditdir}  = $value if $option =~ /^transcript-directory$/;
 	$cfg->{auditfile} = $value if $option =~ /^transcript-systems$/;
 	$cfg->{pager}     = $value if $option =~ /^pager$/;
+
+	# Validate pager to untaint for later use
+	unless ($cfg->{pager} =~ m#^(/[\w./-]+)$#) {
+		log_error "Invalid pager configuration";
+		exit 6;
+	}
+	$cfg->{pager} = $1;
 }
 
 # loadAuthorization() - Load system authorizations from file
@@ -206,7 +219,7 @@ sub loadAuthorization(\%)
 {
 	my $cfg = shift();
 
-	return 0 unless open(AUTH, "<$cfg->{authfile}");
+	return 0 unless open(AUTH, "<", $cfg->{authfile});
 
 	AUTH_ENT: while (<AUTH>) {
 		chomp;
@@ -304,7 +317,7 @@ sub readFile($$)
 {
 	my ($file, $sub) = @_;
 
-	return 0 unless open(CONF, "<$file");
+	return 0 unless open(CONF, "<", "$file");
 	while (<CONF>) {
 		chomp;
 		next if /^#/;		# ignore comments
