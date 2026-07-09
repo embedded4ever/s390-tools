@@ -742,6 +742,8 @@ static int read_cmdline(struct task_t *task)
 			buf[i] = ' ';
 	}
 	name_lens.cmdline_len = num;
+	if (name_lens.cmdline_len > MAX_CMD_LEN)
+		name_lens.cmdline_len = MAX_CMD_LEN;
 	cmdlnlenp = mon_record + sizeof(struct monwrite_hdr);
 	cmdlnlenp += sizeof(struct procd_hdr);
 	cmdlnlenp += sizeof(struct task_t);
