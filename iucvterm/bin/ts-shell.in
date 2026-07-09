@@ -227,6 +227,16 @@ sub checkConfiguration(\%)
 		exit 7;
 	}
 	$cfg->{iucvconn} = $1;
+
+	# Validate transcript-directory to untaint for later use
+	unless ($cfg->{auditdir} =~ m#^(/[\w./-]+)$#) {
+		log_error "Invalid transcript-directory configuration";
+		exit 8;
+	}
+	$cfg->{auditdir} = $1;
+
+	# Untaint user name (tainted by getpwuid) for use in filesystem paths
+	($cfg->{user}) = ($cfg->{user} =~ /^([\w.-]+)$/);
 }
 
 # loadAuthorization() - Load system authorizations from file
