@@ -44,7 +44,20 @@
 #define MAX_GET_DATA  4094  /* maximum GET response data length */
 #define GET_AREA_LEN  MAX_GET_DATA + 512  /* size for GET command area length */
 #define TIME_BUF_SIZE 128   /* buffer size for date and time string */
-#define MAX_OID_STR_LEN   MAX_OID_LEN * 5 /* max OID string size */
+
+/*
+ * Define maximum SNMP OID string size.
+ * An OID can have up to 128 sub-ids and each sub-id can have up to 10
+ * digits. When converted to string, this means 1 character for the
+ * period separator and 10 characters for the digits themselves. At
+ * the end of OID string, we need one more character for the null
+ * terminator. The unsigned long data type, which can have up to 20
+ * digits is used to represent a sub-id. This means each sub-id
+ * string now needs 20+1 characters instead of 10+1 in-order to avoid
+ * compiler warnings.
+ */
+#define MAX_OID_STR_LEN (MAX_OID_LEN * 21) + 1
+
 /* definitions for 2.6 qeth */
 #define QETH_SYSFILE "/sys/bus/ccwgroup/drivers/qeth/notifier_register"
 #define SIOC_QETH_ADP_SET_SNMP_CONTROL	(SIOCDEVPRIVATE + 5)

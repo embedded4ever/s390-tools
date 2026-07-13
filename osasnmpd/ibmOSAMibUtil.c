@@ -110,7 +110,7 @@ int str_to_oid_conv ( char* uc_oid, oid* ul_oid )
  *********************************************************************/
 int oid_to_str_conv (oid* ul_oid, size_t length, char* uc_oid )
 {
-  #define MAX_CHARS 50           /* size of buffer */
+  #define MAX_CHARS 22           /* size of buffer */
   int i;
   short  valid = TRUE;
   char   buffer[MAX_CHARS];      /* buffer used for conversion */
@@ -125,9 +125,9 @@ int oid_to_str_conv (oid* ul_oid, size_t length, char* uc_oid )
         {
           /* convert and append OID digit to return string */ 
           if (i == 0)       
-            sprintf( buffer, "%lu", ul_oid[i] );
+            snprintf( buffer, sizeof(buffer), "%lu", ul_oid[i] );
           else 
-            sprintf( buffer, ".%lu", ul_oid[i] );   
+            snprintf( buffer, sizeof(buffer), ".%lu", ul_oid[i] );
          
           strcat( uc_oid, buffer ); 
         } /* end for */
