@@ -220,20 +220,22 @@ pub fn verify_chain(
         // verify certificate
         let res = ctx.verify_cert()?;
         if !res {
-            debug!("Failed to verify the signing key with the chain of trust");
+            error!("error: Failed to verify the signing key with the chain of trust");
             return Ok(res);
         }
         // verify that the chain is as expected
         let chain = match ctx.chain() {
             Some(c) => c,
             None => {
-                debug!("No verification chain in verify-context. (openssl BUG)");
+                error!("error: No verification chain in verify-context. (openssl BUG)");
                 ctx.set_error(X509VerifyResult::APPLICATION_VERIFICATION);
                 return Ok(false);
             }
         };
         if chain.len() < SECURITY_CHAIN_MAX_LEN as usize {
-            debug!("Verification expects one root and at least one intermediate certificate",);
+            error!(
+                "error: Verification expects one root and at least one intermediate certificate",
+            );
             ctx.set_error(X509VerifyResult::APPLICATION_VERIFICATION);
             return Ok(false);
         }
