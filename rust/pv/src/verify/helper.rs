@@ -220,7 +220,7 @@ pub fn verify_chain(
         // verify certificate
         let res = ctx.verify_cert()?;
         if !res {
-            debug!("Failed to verify the singing key with the chain of trust");
+            debug!("Failed to verify the signing key with the chain of trust");
             return Ok(res);
         }
         // verify that the chain is as expected
