@@ -832,37 +832,82 @@ scan_bls_field(struct misc_file_buffer *file, struct scan_token* scan,
 }
 
 /**
- * find a line with keyword "title" and move it to the top
+ * Scan the FILE and look for keywords matching KW_PATTERN at the beginning
+ * of each line.
+ * Return number of such keyword lines found.
+ * Store size and offset of the last such keyword line at KW_LINE_SIZE and
+ * KW_LINE_OFFSET respectively
  */
-static int sort_bls_fields(struct misc_file_buffer *file, char *filename)
+static int find_keyword_line(struct misc_file_buffer *file,
+			     const char *kw_pattern, size_t *kw_line_size,
+			     size_t *kw_line_offset)
 {
-	bool is_title = false;
-	size_t title_len = 0;
-	size_t title_off = 0;
-	int nr_titles = 0;
-	char *title;
+	size_t kw_pattern_size;
+	off_t file_pos_orig;
+	int nr_found = 0;
+	int is_kw_line;
 	int current;
-	size_t len;
+	int i;
 
-	while (file->length - file->pos > 4 /* for "title" */) {
-		if (strncmp("title", &file->buffer[file->pos], 5) == 0) {
-			is_title = true;
-			nr_titles++;
-			title_off = file->pos;
+	kw_pattern_size = strlen(kw_pattern);
+	file_pos_orig = file->pos;
+	file->pos = 0;
+
+	while (file->length - file->pos >= kw_pattern_size) {
+		is_kw_line = 0;
+		if (strncmp(kw_pattern, &file->buffer[file->pos],
+			    kw_pattern_size) == 0) {
+			nr_found++;
+			if (kw_line_offset)
+				*kw_line_offset = file->pos;
+			is_kw_line = 1;
 		}
-		for (len = 0;; file->pos++, len++) {
+		for (i = 0;; file->pos++, i++) {
 			current = misc_get_char(file, 0);
 			if (current == '\n' || current == EOF)
 				break;
 		}
-		if (is_title == true)
-			title_len = len;
+		if (is_kw_line && kw_line_size)
+			*kw_line_size = i;
 		if (current == EOF)
 			break;
 		file->pos++;
 	}
-	file->pos = 0;
+	file->pos = file_pos_orig;
+	return nr_found;
+}
 
+/**
+ * Check for Rule 5
+ */
+static int check_keyword_line(struct misc_file_buffer *file, char *filename,
+			      const char *kw_pattern)
+{
+	if (find_keyword_line(file, kw_pattern, NULL, NULL) > 1) {
+		error_reason("More than one '%s' keyword specified in %s",
+			     kw_pattern, filename);
+		return -1;
+	}
+	return 0;
+}
+
+/**
+ * find a line with keyword "title" and move it to the top
+ */
+static int sort_bls_fields(struct misc_file_buffer *file, char *filename)
+{
+	size_t title_len = 0;
+	size_t title_off = 0;
+	int nr_titles;
+	char *title;
+
+	if (check_keyword_line(file, filename, "linux"))
+		return -1;
+	if (check_keyword_line(file, filename, "initrd"))
+		return -1;
+	if (check_keyword_line(file, filename, "options"))
+		return -1;
+	nr_titles = find_keyword_line(file, "title", &title_len, &title_off);
 	if (nr_titles == 0) {
 		error_reason("no title in %s", filename);
 		return -1;
@@ -873,7 +918,6 @@ static int sort_bls_fields(struct misc_file_buffer *file, char *filename)
 	}
 	if (title_off == 0)
 		return 0;
-
 	title = misc_malloc(title_len);
 	if (!title)
 		return -1;
