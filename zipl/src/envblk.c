@@ -675,8 +675,12 @@ static int add_line_namespace(char *this, void *data)
 	int val;
 
 	val = strtol(this, &endptr, 10);
-	if (endptr == this)
+	if (endptr == this) {
 		val = MAX_NR_SITES;
+	} else if (val < 0 || val >= MAX_NR_SITES) {
+		error_reason("Bad site value (%d)", val);
+		return -EINVAL;
+	}
 	if (!tables[val]) {
 		tables[val] =
 			util_zalloc(LINE_HASH_SIZE * sizeof(*tables));
