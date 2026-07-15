@@ -616,17 +616,19 @@ extract_signature(const char *filename, void **ret_signature,
 
 	if (misc_read_file(filename, &buffer, &size, 0))
 		return 0;
-
+	if (size < sizeof(*file_sig))
+		goto out;
 	file_sig = (void *) buffer + size - sizeof(*file_sig);
 	if (memcmp(file_sig->magic, SIGNATURE_MAGIC, sizeof(file_sig->magic))
 	    != 0)
 		goto out;
-
+	if (file_sig->sig_len > size - sizeof(*file_sig))
+		/* Trailer is corrupted. Treated as unsigned file */
+		goto out;
 	signature = misc_malloc(file_sig->sig_len);
 	if (signature == NULL)
 		goto out;
 	signature_size = file_sig->sig_len;
-
 	memcpy(signature, buffer + size - signature_size - sizeof(*file_sig),
 	       signature_size);
 
