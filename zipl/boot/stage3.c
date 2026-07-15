@@ -107,6 +107,7 @@ secure_boot_enabled()
 }
 
 #define ZIPL_ENVBLK_SIGNATURE	"# zIPL Environment Block\n"
+#define ENVBLK_SIGNATURE_SIZE   (sizeof(ZIPL_ENVBLK_SIGNATURE) - 1)
 #define STR_HASH_SIZE (16)
 
 struct env_hash_entry {
@@ -177,39 +178,48 @@ static void parse_envblk(struct env_hash_entry *items,
 	unsigned int len = 0;
 	unsigned int off = 0;
 	unsigned int idx = 0;
-	char *name;
-	char *value;
+	char *equation;
+	char *newline;
 
 	ebcdic_to_ascii((unsigned char *)sgn,
-			(unsigned char *)sgn, sizeof(sgn) - 1);
+			(unsigned char *)sgn, ENVBLK_SIGNATURE_SIZE);
 
-	if (strncmp((char *)_stage3_parms.envblk_addr, sgn, sizeof(sgn) - 1)) {
-		printf("Bad envblk\n");
-		return;
-	}
-	/* we rely that environment block is consistent */
-	name = (char *)_stage3_parms.envblk_addr + sizeof(sgn) - 1;
+	if (strncmp((char *)_stage3_parms.envblk_addr, sgn,
+		    ENVBLK_SIGNATURE_SIZE))
+		goto bad_envblk;
+
+	/* The first newline is located in the signature */
+	newline = (char *)_stage3_parms.envblk_addr + ENVBLK_SIGNATURE_SIZE - 1;
 	/*
 	 * calculate significant length of the environment block
 	 * (excluding trailing zeros)
 	 */
-	while (len < _stage3_parms.envblk_len) {
-		if (name[len] == 0)
+	while (len < _stage3_parms.envblk_len - ENVBLK_SIGNATURE_SIZE) {
+		if (newline[len + 1] == 0)
 			break;
 		len++;
 	}
 	while (off < len && idx < PAGE_SIZE / sizeof(struct env_hash_entry)) {
-		value = strchr(name, 0x3D /* = */) + 1;
+		equation = strchr(newline + 1, 0x3D /* = */);
+		if (!equation)
+			/* '=' not found */
+			goto bad_envblk;
 		/* null-terminate the name */
-		*(value - 1) = 0;
-		hash_table_add(items, buckets, &idx, (unsigned long)name);
-		off += (value - name); /* offset of the value */
-
-		name = strchr(value, 0x0A /* /n */) + 1;
+		*equation = 0;
+		hash_table_add(items, buckets, &idx,
+			       (unsigned long)(newline + 1));
+		off += (equation - newline);
+		newline = strchr(equation + 1, 0x0A /* /n */);
+		if (!newline)
+			/* '/n' not found */
+			goto bad_envblk;
 		/* null-terminate the value */
-		*(name - 1) = 0;
-		off += (name - value); /* offset of the next name (if any) */
+		*newline = 0;
+		off += (newline - equation);
 	}
+	return;
+bad_envblk:
+	printf("Bad envblk\n");
 }
 
 /**
