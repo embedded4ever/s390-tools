@@ -292,7 +292,8 @@ void process_parm_line(struct env_hash_entry **buckets, unsigned int cmdl_len,
 		 */
 		len = strlen(val);
 
-		if (cmdl_len + len - (end - start + 1) >= max_len)
+		if ((cmdl_end - (char *)COMMAND_LINE) + len -
+		    (end - start + 1) >= max_len)
 			/* VALUE doesn't fit */
 			break;
 		/*
@@ -309,6 +310,10 @@ void process_parm_line(struct env_hash_entry **buckets, unsigned int cmdl_len,
 		start += len;
 	}
 	if (cmdl_len > cmdl_end - (char *)COMMAND_LINE)
+		/*
+		 * the resulted command line is shorter than the
+		 * original one. Erase the garbage at the end
+		 */
 		memset(cmdl_end, 0,
 		       cmdl_len - (cmdl_end - (char *)COMMAND_LINE));
 }
