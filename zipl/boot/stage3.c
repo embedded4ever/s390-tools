@@ -171,12 +171,12 @@ static struct env_hash_entry *hash_table_find(struct env_hash_entry **buckets,
  * magic'\n'name1=value1'\n'...nameN=valueN'\n'zero-padding
  */
 static void parse_envblk(struct env_hash_entry *items,
-			 struct env_hash_entry **buckets,
-			 unsigned int *nr)
+			 struct env_hash_entry **buckets)
 {
 	char sgn[] = ZIPL_ENVBLK_SIGNATURE;
 	unsigned int len = 0;
 	unsigned int off = 0;
+	unsigned int idx = 0;
 	char *name;
 	char *value;
 
@@ -198,11 +198,11 @@ static void parse_envblk(struct env_hash_entry *items,
 			break;
 		len++;
 	}
-	while (off < len) {
+	while (off < len && idx < PAGE_SIZE / sizeof(struct env_hash_entry)) {
 		value = strchr(name, 0x3D /* = */) + 1;
 		/* null-terminate the name */
 		*(value - 1) = 0;
-		hash_table_add(items, buckets, nr, (unsigned long)name);
+		hash_table_add(items, buckets, &idx, (unsigned long)name);
 		off += (value - name); /* offset of the value */
 
 		name = strchr(value, 0x0A /* /n */) + 1;
@@ -398,7 +398,6 @@ static void handle_environment(unsigned int len, unsigned int max_len)
 {
 	struct env_hash_entry *buckets[STR_HASH_SIZE];
 	struct env_hash_entry *items;
-	unsigned int nr_items = 0;
 	struct nr_pair np;
 
 	if (_stage3_parms.envblk_addr == 0 ||
@@ -410,7 +409,7 @@ static void handle_environment(unsigned int len, unsigned int max_len)
 	/*
 	 * scan in-memory environment block and populate hash table
 	 */
-	parse_envblk(items, buckets, &nr_items);
+	parse_envblk(items, buckets);
 	/*
 	 * find environment variables in the command line and
 	 * replace them with their values as found in the hash table
