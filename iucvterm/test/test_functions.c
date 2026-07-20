@@ -113,7 +113,7 @@ static int __testReadWriteMessage_nochunks(int sv[2])
 		if (iucvtty_read_msg(sv[1], msg[1], 6 + MSG_DATA_OFFSET, &residual))
 			return 2;
 		assert(0 == memcmp(msg[1]->data, data, msg[1]->datalen));
-		iucvtty_skip_msg_residual(sv[1], &residual);
+		iucvtty_skip_msg_chunk(sv[1], &residual);
 		assert(0 == residual);
 		/*printf("datalen=%u data='%s'\n",
 			msg[1]->datalen, msg[1]->data);*/
@@ -143,7 +143,7 @@ static int __testReadWriteMessage(int sv[2])
 	/* read msg */
 	if (iucvtty_read_msg(sv[1], msg[1], BUF_SIZE, &chunk))
 		return 2;
-	iucvtty_skip_msg_residual(sv[1], &chunk);
+	iucvtty_skip_msg_chunk(sv[1], &chunk);
 
 	/* compare msg */
 	if (__msgcmp(msg[0], msg[1]))
