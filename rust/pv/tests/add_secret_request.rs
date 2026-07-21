@@ -305,3 +305,164 @@ fn verify_no_user_data() {
         Ok(None)
     ))
 }
+
+// V2 tests (using hybrid keys)
+
+#[test]
+fn null_none_default_ncuid_two_user_unsgn() {
+    let _guard = DeterministicTestRandGuard::install(&[0x42; 4096], &[0x11; 32]).unwrap();
+    let user_data_orig = vec![0x56; 0x183];
+    let (host_key, ctx) = get_crypto_v2();
+    let mut asrcb =
+        AddSecretRequest::new(AddSecretVersion::Two, GuestSecret::Null, TAGS, no_flag())
+            .expect("AddSecretRequest::new failed");
+
+    asrcb.add_hostkey(host_key).unwrap();
+    asrcb.set_user_data(user_data_orig.clone(), None).unwrap();
+    let asrcb = asrcb.encrypt(&ctx).unwrap();
+
+    let user_data = verify_asrcb_and_get_user_data(asrcb, None).unwrap();
+
+    assert_eq!(
+        user_data_orig.as_slice(),
+        &user_data.as_ref().unwrap()[..user_data_orig.len()]
+    );
+}
+
+#[test]
+fn null_none_default_ncuid_two_user_ec() {
+    let _guard = DeterministicTestRandGuard::install(&[0x42; 4096], &[0x11; 32]).unwrap();
+    let (usr_sgn_key, _) = get_test_keys();
+
+    let usr_vrfy_key = usr_sgn_key.ec_key().unwrap();
+    let usr_vrfy_key = usr_vrfy_key.public_key();
+    let usr_vrfy_key = PKey::from_ec_key(
+        EcKey::from_public_key(
+            &EcGroup::from_curve_name(Nid::SECP521R1).unwrap(),
+            usr_vrfy_key,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let user_data_orig = vec![0x56; 0x100];
+    let asrcb = create_signed_asrcb_v2(usr_sgn_key, user_data_orig.clone());
+
+    let user_data = verify_asrcb_and_get_user_data(asrcb, Some(usr_vrfy_key)).unwrap();
+    assert_eq!(
+        user_data_orig.as_slice(),
+        &user_data.as_ref().unwrap()[..user_data_orig.len()]
+    );
+}
+
+#[test]
+fn null_none_default_ncuid_two_user_rsa2048() {
+    let _guard = DeterministicTestRandGuard::install(&[0x42; 4096], &[0x11; 32]).unwrap();
+    let usr_sgn_key = get_test_asset!("keys/rsa2048key.pem");
+    let usr_sgn_key = PKey::private_key_from_pem(usr_sgn_key).unwrap();
+    let user_data_orig = vec![0x56; 0x100];
+    let asrcb = create_signed_asrcb_v2(usr_sgn_key, user_data_orig.clone());
+
+    let usr_vrfy_key = get_test_asset!("keys/rsa2048key.pub.pem");
+    let usr_vrfy_key = PKey::public_key_from_pem(usr_vrfy_key).unwrap();
+
+    let user_data = verify_asrcb_and_get_user_data(asrcb, Some(usr_vrfy_key)).unwrap();
+    assert_eq!(
+        user_data_orig.as_slice(),
+        &user_data.as_ref().unwrap()[..user_data_orig.len()]
+    );
+}
+
+#[test]
+fn null_none_default_ncuid_two_user_rsa3072() {
+    let _guard = DeterministicTestRandGuard::install(&[0x42; 4096], &[0x11; 32]).unwrap();
+    let usr_sgn_key = get_test_asset!("keys/rsa3072key.pem");
+    let usr_sgn_key = PKey::private_key_from_pem(usr_sgn_key).unwrap();
+    let user_data_orig = vec![0x56; 0x80];
+    let asrcb = create_signed_asrcb_v2(usr_sgn_key, user_data_orig.clone());
+
+    let usr_vrfy_key = get_test_asset!("keys/rsa3072key.pub.pem");
+    let usr_vrfy_key = PKey::public_key_from_pem(usr_vrfy_key).unwrap();
+
+    let user_data = verify_asrcb_and_get_user_data(asrcb, Some(usr_vrfy_key)).unwrap();
+    assert_eq!(
+        user_data_orig.as_slice(),
+        &user_data.as_ref().unwrap()[..user_data_orig.len()]
+    );
+}
+
+#[test]
+fn null_none_default_cuid_two() {
+    let _guard = DeterministicTestRandGuard::install(&[0x42; 4096], &[0x11; 32]).unwrap();
+    let asrcb = gen_asrcb_v2(GuestSecret::Null, None, no_flag(), true).unwrap();
+    let exp = get_test_asset!("exp/asrcb/null_none_default_cuid_two");
+    assert_eq!(asrcb, exp);
+}
+
+#[test]
+fn assoc_none_default_cuid_two() {
+    let asrcb = gen_asrcb_v2(association(), None, no_flag(), true).unwrap();
+    let exp = get_test_asset!("exp/asrcb/assoc_none_default_cuid_two");
+    assert_eq!(asrcb, exp);
+}
+
+#[test]
+fn null_simple_default_cuid_two() {
+    let asrcb = gen_asrcb_v2(GuestSecret::Null, ext_simple(), no_flag(), true).unwrap();
+    let exp = get_test_asset!("exp/asrcb/null_simple_default_cuid_two");
+    assert_eq!(asrcb, exp);
+}
+
+#[test]
+fn assoc_simple_default_cuid_two() {
+    let asrcb = gen_asrcb_v2(association(), ext_simple(), no_flag(), true).unwrap();
+    let exp = get_test_asset!("exp/asrcb/assoc_simple_default_cuid_two");
+    assert_eq!(asrcb, exp);
+}
+
+#[test]
+fn null_derived_default_cuid_two() {
+    let asrcb = gen_asrcb_v2(GuestSecret::Null, ext_derived(), no_flag(), true).unwrap();
+    let exp = get_test_asset!("exp/asrcb/null_derived_default_cuid_two");
+    assert_eq!(asrcb, exp);
+}
+
+#[test]
+fn assoc_derived_default_cuid_two() {
+    let asrcb = gen_asrcb_v2(association(), ext_derived(), no_flag(), true).unwrap();
+    let exp = get_test_asset!("exp/asrcb/assoc_derived_default_cuid_two");
+    assert_eq!(asrcb, exp);
+}
+
+#[test]
+fn null_none_dump_cuid_two() {
+    let mut flags = no_flag();
+    flags.set_disable_dump();
+    let asrcb = gen_asrcb_v2(GuestSecret::Null, None, flags, true).unwrap();
+    let exp = get_test_asset!("exp/asrcb/null_none_dump_cuid_two");
+    assert_eq!(asrcb, exp);
+}
+
+#[test]
+fn null_none_default_ncuid_two() {
+    let asrcb = gen_asrcb_v2(GuestSecret::Null, None, no_flag(), false).unwrap();
+    let exp = get_test_asset!("exp/asrcb/null_none_default_ncuid_two");
+    assert_eq!(asrcb, exp);
+}
+
+#[test]
+fn null_none_default_cuid_seven_two() {
+    let _guard = DeterministicTestRandGuard::install(&[0x42; 4096], &[0x11; 32]).unwrap();
+    let (hkd, ctx) = get_crypto_v2();
+    let mut asrcb =
+        AddSecretRequest::new(AddSecretVersion::Two, GuestSecret::Null, TAGS, no_flag())
+            .expect("AddSecretRequest::new failed");
+    for _ in 0..7 {
+        asrcb.add_hostkey(hkd.clone()).unwrap()
+    }
+    asrcb.set_cuid(CUID);
+    let asrcb = asrcb.encrypt(&ctx).unwrap();
+
+    let exp = get_test_asset!("exp/asrcb/null_none_default_cuid_seven_two");
+    assert_eq!(asrcb, exp);
+}

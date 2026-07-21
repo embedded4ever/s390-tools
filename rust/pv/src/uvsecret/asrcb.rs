@@ -528,3 +528,84 @@ impl Request for AddSecretRequest {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::request::SeHdrVersion;
+
+    #[test]
+    fn add_secret_version_v1() {
+        // Test V1 version constant
+        assert_eq!(AddSecretVersion::One as u32, 0x0100);
+    }
+
+    #[test]
+    fn add_secret_version_v2() {
+        // Test V2 version constant
+        assert_eq!(AddSecretVersion::Two as u32, 0x0200);
+    }
+
+    #[test]
+    fn add_secret_version_conversion_v1() {
+        // Test conversion from SeHdrVersion to AddSecretVersion for V1
+        let v1: AddSecretVersion = SeHdrVersion::One.into();
+        assert_eq!(v1, AddSecretVersion::One);
+    }
+
+    #[test]
+    fn add_secret_version_conversion_v2() {
+        // Test conversion from SeHdrVersion to AddSecretVersion for V2
+        let v2: AddSecretVersion = SeHdrVersion::Two.into();
+        assert_eq!(v2, AddSecretVersion::Two);
+    }
+
+    #[test]
+    fn add_secret_version_into_request_version() {
+        // Test conversion from AddSecretVersion to RequestVersion
+        let v1: RequestVersion = AddSecretVersion::One.into();
+        assert_eq!(v1, 0x0100);
+
+        let v2: RequestVersion = AddSecretVersion::Two.into();
+        assert_eq!(v2, 0x0200);
+    }
+
+    #[test]
+    fn add_secret_flags_default() {
+        // Test default flags have no bits set
+        let flags = AddSecretFlags::default();
+        let uv_flags: UvFlags = flags.into();
+
+        // Default should have all bits cleared
+        assert_eq!(uv_flags.as_bytes(), &[0u8; 8]);
+    }
+
+    #[test]
+    fn add_secret_flags_disable_dump() {
+        // Test disable dump flag sets bit 0
+        let mut flags = AddSecretFlags::default();
+        flags.set_disable_dump();
+
+        let uv_flags: UvFlags = flags.into();
+
+        // Bit 0 should be set, so bytes should not be all zeros
+        assert_ne!(uv_flags.as_bytes(), &[0u8; 8]);
+    }
+
+    #[test]
+    fn req_auth_data_size() {
+        // Test ReqAuthData size constant
+        use std::mem::size_of;
+
+        assert_eq!(size_of::<ReqAuthDataV1>(), 0x1e8);
+    }
+
+    #[test]
+    #[cfg(any(debug_assertions, test))]
+    fn add_secret_version_inv_for_testing() {
+        // Test that invalid version exists for testing
+        assert_eq!(AddSecretVersion::Inv as u32, 0);
+        assert_ne!(AddSecretVersion::Inv, AddSecretVersion::One);
+        assert_ne!(AddSecretVersion::Inv, AddSecretVersion::Two);
+    }
+}
