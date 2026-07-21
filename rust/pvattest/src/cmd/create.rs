@@ -10,7 +10,7 @@ use pv::attest::{AttestationFlags, AttestationMeasAlg, AttestationRequest, Attes
 use pv::misc::{create_file, write_file};
 use pv::request::{HostKey, ReqEncrCtx, Request, SymKey, SymKeyType};
 
-use crate::cli::{AttAddFlags, CreateAttOpt};
+use crate::cli::{AttAddFlags, AttVersion, AttVersionSelection, CreateAttOpt};
 use crate::exchange::{ExchangeFormatRequest, ExchangeFormatVersion};
 
 fn flags(cli_flags: &[AttAddFlags]) -> AttestationFlags {
@@ -26,18 +26,54 @@ fn flags(cli_flags: &[AttAddFlags]) -> AttestationFlags {
     att_flags
 }
 
+/// Auto-detect the attestation version based on the host keys.
+///
+/// Returns Two if any host key is a hybrid key, otherwise returns V1.
+fn auto_detect_version(host_keys: &[HostKey]) -> AttestationVersion {
+    let use_hybrid_keys = host_keys.iter().any(|k: &HostKey| k.is_hybrid());
+    if use_hybrid_keys {
+        AttestationVersion::Two
+    } else {
+        AttestationVersion::One
+    }
+}
+
+impl From<AttVersion> for AttestationVersion {
+    fn from(value: AttVersion) -> Self {
+        match value {
+            AttVersion::V1 => Self::One,
+            AttVersion::V2 => Self::Two,
+        }
+    }
+}
+
+/// Determine the attestation  version to use.
+///
+/// If an explicit version is provided via CLI, use that.
+/// Otherwise, auto-detect based on the host key types.
+fn determine_version(
+    cli_version: AttVersionSelection,
+    host_keys: &[HostKey],
+) -> AttestationVersion {
+    match cli_version {
+        AttVersionSelection::Auto => auto_detect_version(host_keys),
+        AttVersionSelection::Explicit(att_version) => att_version.into(),
+    }
+}
+
 pub fn create(opt: &CreateAttOpt) -> Result<ExitCode> {
-    let att_version = AttestationVersion::One;
+    let hkds = opt
+        .certificate_args
+        .get_verified_hkds_new("attestation request", opt.att_version.map(|v| v.into()))?;
+
+    let att_version = determine_version(opt.att_version, &hkds);
     let meas_alg = AttestationMeasAlg::HmacSha512;
 
     let mut arcb = AttestationRequest::new(att_version, meas_alg, flags(&opt.add_data))?;
     debug!("Generated Attestation request");
 
     // Add host-key documents
-    opt.certificate_args
-        .get_verified_hkds("attestation request")?
-        .into_iter()
-        .for_each(|k| arcb.add_hostkey(HostKey::V1(k)));
+    hkds.into_iter().for_each(|k| arcb.add_hostkey(k));
     debug!("Added all host-keys");
 
     let encr_ctx =

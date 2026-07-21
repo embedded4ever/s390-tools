@@ -5,7 +5,10 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum, ValueHint};
-use utils::{CertificateOptions, DeprecatedVerbosityOptions};
+use utils::{
+    AutoOrExplicit, AutoOrExplicitParser, CertificateOptions, DeprecatedVerbosityOptions,
+    HkdVersion, ValueEnumDisplay, ValueEnumFromStr,
+};
 
 /// create, perform, and verify attestation measurements
 ///
@@ -67,6 +70,29 @@ pub enum Command {
     Version,
 }
 
+/// Secure Execution attestation version for CLI
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, ValueEnumDisplay, ValueEnumFromStr)]
+pub enum AttVersion {
+    #[value(name = "1")]
+    /// Version 1 - uses traditional cryptographic keys
+    V1,
+    #[value(name = "2")]
+    /// Version 2 - uses hybrid (post-quantum) cryptographic keys
+    V2,
+}
+
+pub type AttVersionSelection = AutoOrExplicit<AttVersion>;
+pub type AttVersionSelectionParser = AutoOrExplicitParser<AttVersion>;
+
+impl From<AttVersion> for HkdVersion {
+    fn from(val: AttVersion) -> Self {
+        match val {
+            AttVersion::V1 => Self::Classical,
+            AttVersion::V2 => Self::Hybrid,
+        }
+    }
+}
+
 #[derive(Args, Debug)]
 pub struct CreateAttOpt {
     #[command(flatten)]
@@ -94,6 +120,10 @@ pub struct CreateAttOpt {
         value_delimiter = ','
     )]
     pub add_data: Vec<AttAddFlags>,
+
+    /// Specify the Attestation Request version to use.
+    #[arg(long = "att-version", value_name = "VERSION", default_value_t = AttVersionSelection::Explicit(AttVersion::V1), value_parser = AttVersionSelectionParser::default())]
+    pub att_version: AttVersionSelection,
 }
 
 #[derive(Debug, ValueEnum, Clone, Copy)]

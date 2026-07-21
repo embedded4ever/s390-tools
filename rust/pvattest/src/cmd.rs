@@ -12,7 +12,7 @@ pub use check::check;
 pub use create::create;
 pub use verify::verify;
 
-pub const CMD_FN: &[&str] = &["+create", "+verify"];
+pub const CMD_FN: &[&str] = &["+create", "+verify", "+quantumsafe"];
 // s390 branch
 #[cfg(target_arch = "s390x")]
 mod uv_cmd {

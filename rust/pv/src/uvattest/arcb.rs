@@ -4,6 +4,7 @@
 
 use std::mem::size_of;
 
+use pv_core::static_assert;
 use zerocopy::{BigEndian, FromBytes, Immutable, IntoBytes, KnownLayout, U32};
 
 use super::additional::{FW_STATE_SIZE, PHKH_SIZE, SECRET_STORE_HASH_SIZE};
@@ -14,7 +15,7 @@ use crate::misc::Flags;
 use crate::req::{Aad, BinReqValues, HostKey, Keyslot, ReqEncrCtx};
 use crate::request::{Confidential, MagicValue, Request, RequestVersion, SymKey, Zeroize};
 use crate::uv::UvFlags;
-use crate::{assert_size, static_assert, Error, Result};
+use crate::{assert_size, Error, Result};
 #[cfg(doc)]
 use crate::{
     request::SymKeyType,
@@ -62,7 +63,7 @@ use crate::{
 /// let hkd = hkd.first().unwrap().public_key()?;
 /// arcb.add_hostkey(HostKey::V1(hkd));
 /// // you can add multiple hostkeys
-/// // arcb.add_hostkey(another_hkd);
+/// // arcb.add_hostkey(HostKey::V1(another_hkd));
 /// // encrypt it
 /// let ctx = ReqEncrCtx::random(SymKeyType::Aes256Gcm)?;
 /// let arcb = arcb.encrypt(&ctx)?;
@@ -106,7 +107,13 @@ impl AttestationRequest {
 
     /// Returns a reference to the flags of this [`AttestationRequest`].
     pub fn flags(&self) -> &AttestationFlags {
-        &self.aad.flags
+        self.aad.flags()
+    }
+
+    /// Returns the request version, derived from the type of added host-keys.
+    /// Returns [`AttestationVersion::One`] if no host-keys have been added yet.
+    pub fn version(&self) -> AttestationVersion {
+        self.version
     }
 
     /// Returns a copy of the confidential data of this [`AttestationRequest`].
@@ -142,6 +149,7 @@ impl AttestationRequest {
         let values = BinReqValues::get(arcb)?;
         match values.version().try_into()? {
             AttestationVersion::One => (),
+            AttestationVersion::Two => (),
         };
 
         Ok(values)
@@ -246,6 +254,8 @@ impl Request for AttestationRequest {
 pub enum AttestationVersion {
     /// Version 1 (= 0x0100)
     One = 0x0100,
+    /// Version 2 (= 0x0200)
+    Two = 0x0200,
 }
 
 impl TryFrom<u32> for AttestationVersion {
@@ -254,6 +264,8 @@ impl TryFrom<u32> for AttestationVersion {
     fn try_from(value: u32) -> Result<Self> {
         if value == Self::One as u32 {
             Ok(Self::One)
+        } else if value == Self::Two as u32 {
+            Ok(Self::Two)
         } else {
             Err(Error::BinArcbInvVersion(value))
         }
@@ -412,8 +424,8 @@ impl Zeroize for ReqConfData {
 mod test {
     use super::*;
     use crate::get_test_asset;
-    use crate::request::SymKey;
-    use crate::test_utils::get_test_keys;
+    use crate::request::{HybridPKey, SymKey};
+    use crate::test_utils::{get_test_keys, get_test_keys_hybrid};
 
     const ARPK: [u8; 32] = [0x17; 32];
     const NONCE: [u8; 16] = [0xab; 16];
@@ -421,6 +433,8 @@ mod test {
 
     fn mk_arcb() -> Vec<u8> {
         let (cust_key, host_key) = get_test_keys();
+        let host_key = HostKey::V1(host_key);
+
         let ctx = ReqEncrCtx::new_aes_256(
             Some([0x55; 12]),
             Some(cust_key),
@@ -443,7 +457,37 @@ mod test {
         arcb.conf.value_mut().nonce = NONCE;
         arcb.conf.value_mut().meas_key = MEAS;
 
-        arcb.add_hostkey(HostKey::V1(host_key));
+        arcb.add_hostkey(host_key);
+        arcb.encrypt(&ctx).unwrap()
+    }
+
+    fn mk_arcb_v2() -> Vec<u8> {
+        let (cust_key, host_key1, host_key2) = get_test_keys_hybrid();
+        let host_key = HostKey::V2(HybridPKey::new(host_key1, host_key2).unwrap());
+
+        let ctx = ReqEncrCtx::new_aes_256(
+            Some([0x55; 12]),
+            Some(cust_key),
+            Some(SymKey::Aes256(ARPK.into())),
+        )
+        .unwrap();
+
+        let mut flags = AttestationFlags::default();
+        flags.set_image_phkh();
+        flags.set_attest_phkh();
+
+        let mut arcb = AttestationRequest::new(
+            AttestationVersion::Two,
+            AttestationMeasAlg::HmacSha512,
+            flags,
+        )
+        .unwrap();
+
+        // manually set confidential data (API does not allow this)
+        arcb.conf.value_mut().nonce = NONCE;
+        arcb.conf.value_mut().meas_key = MEAS;
+
+        arcb.add_hostkey(host_key);
         arcb.encrypt(&ctx).unwrap()
     }
 
@@ -456,8 +500,43 @@ mod test {
     }
 
     #[test]
+    fn arcb_v2() {
+        let request = mk_arcb_v2();
+        // Expected bytes for a V2 ARCB: rqvn = 0x0200 (bytes 8-11), rest deterministic.
+        // The first 288 bytes cover header + customer-public-key + one V2 keyslot header.
+        let exp: [u8; 288] = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 7, 208, 85, 85, 85, 85, 85, 85, 85, 85, 85,
+            85, 85, 85, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 80, 112, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 199,
+            93, 52, 249, 22, 82, 219, 69, 123, 11, 32, 156, 70, 164, 145, 164, 78, 226, 177, 110,
+            35, 194, 216, 218, 241, 22, 103, 138, 98, 242, 76, 227, 50, 197, 153, 95, 8, 69, 107,
+            102, 177, 109, 213, 90, 146, 197, 7, 241, 227, 26, 247, 140, 100, 168, 46, 122, 84, 27,
+            21, 19, 80, 21, 242, 2, 134, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 64, 128, 88,
+            167, 241, 165, 195, 80, 151, 83, 58, 2, 169, 56, 121, 231, 222, 103, 186, 40, 11, 206,
+            131, 101, 236, 148, 178, 185, 8, 245, 137, 195, 169, 152, 216, 190, 30, 99, 7, 215, 74,
+            224, 26, 220, 70, 130, 95, 246, 187, 111, 160, 92, 17, 71, 207, 226, 204, 244, 162, 79,
+            61, 131, 61, 218, 112, 255, 94, 191, 53, 220, 196, 47, 37, 93, 227, 234, 101, 1, 174,
+            171, 68, 42, 136, 92, 238, 72, 6, 17, 77, 231, 225, 174, 22, 222, 188, 212, 15, 248,
+            145, 72, 126, 139, 17, 233, 225, 156, 46, 233, 151, 54, 2, 175, 88, 215, 254, 243, 222,
+            37, 81, 50, 110, 18, 76, 252, 12, 210, 146, 66, 23,
+        ];
+
+        // only compare non-randomized part
+        assert_eq!(request[..288], exp[..288]);
+    }
+
+    #[test]
     fn auth_bin() {
         let request = mk_arcb();
+        let auth_bin = AttestationRequest::auth_bin(&request).unwrap();
+        let exp = &request[0x30..0x40];
+
+        assert_eq!(exp, auth_bin.as_bytes());
+    }
+
+    #[test]
+    fn auth_bin_v2() {
+        let request = mk_arcb_v2();
         let auth_bin = AttestationRequest::auth_bin(&request).unwrap();
         let exp = &request[0x30..0x40];
 
@@ -474,9 +553,113 @@ mod test {
     }
 
     #[test]
+    fn decrypt_bin_v2() {
+        let request = mk_arcb_v2();
+        let arpk = SymKey::Aes256(ARPK.into());
+        let (_, conf) = AttestationRequest::decrypt_bin(&request, &arpk).unwrap();
+        assert_eq!(conf.measurement_key(), &MEAS);
+        assert_eq!(conf.nonce().as_ref().unwrap().value(), &NONCE);
+    }
+
+    #[test]
+    fn arcb_v1_version() {
+        // Without any host-keys, version defaults to One
+        let arcb = AttestationRequest::new(
+            AttestationVersion::One,
+            AttestationMeasAlg::HmacSha512,
+            AttestationFlags::default(),
+        )
+        .unwrap();
+
+        assert_eq!(arcb.version(), AttestationVersion::One);
+    }
+
+    #[test]
+    fn arcb_v2_version() {
+        // After adding a V2 host-key, version is Two
+        let mut arcb = AttestationRequest::new(
+            AttestationVersion::Two,
+            AttestationMeasAlg::HmacSha512,
+            AttestationFlags::default(),
+        )
+        .unwrap();
+        let (_, host_key1, host_key2) = get_test_keys_hybrid();
+        arcb.add_hostkey(HostKey::V2(HybridPKey::new(host_key1, host_key2).unwrap()));
+
+        assert_eq!(arcb.version(), AttestationVersion::Two);
+    }
+
+    #[test]
+    fn attestation_version_try_from() {
+        // Test version conversion from u32
+        assert_eq!(
+            AttestationVersion::try_from(0x0100).unwrap(),
+            AttestationVersion::One
+        );
+        assert_eq!(
+            AttestationVersion::try_from(0x0200).unwrap(),
+            AttestationVersion::Two
+        );
+
+        // Invalid version should error
+        assert!(AttestationVersion::try_from(0x0300).is_err());
+    }
+
+    #[test]
+    fn attestation_flags_expected_size() {
+        // Test expected additional data size calculation for V1
+        let mut flags = AttestationFlags::default();
+
+        // Image PHKH flag - should be 32 bytes
+        flags.set_image_phkh();
+        assert_eq!(flags.expected_additional_size(), 32);
+
+        // Add attest PHKH flag - should be 64 bytes (32 + 32)
+        flags.set_attest_phkh();
+        assert_eq!(flags.expected_additional_size(), 64);
+
+        // Add secret store hash - should be 128 bytes (64 + 64)
+        flags.set_secret_store_hash();
+        assert_eq!(flags.expected_additional_size(), 128);
+
+        // Add firmware state - should be 448 bytes (128 + 320)
+        flags.set_firmware_state();
+        assert_eq!(flags.expected_additional_size(), 448);
+    }
+
+    #[test]
+    fn confidential_data_v2() {
+        // Test confidential data extraction (version-independent)
+        let arcb = AttestationRequest::new(
+            AttestationVersion::Two,
+            AttestationMeasAlg::HmacSha512,
+            AttestationFlags::default(),
+        )
+        .unwrap();
+
+        let conf = arcb.confidential_data();
+
+        // Should have measurement key and nonce
+        assert_eq!(conf.measurement_key().len(), 64);
+        assert!(conf.nonce().is_some());
+        assert_eq!(conf.nonce().as_ref().unwrap().value().len(), 16);
+    }
+
+    #[test]
     fn decrypt_bin_fail_magic() {
         let arpk = SymKey::Aes256(ARPK.into());
         let mut tamp_arcb = mk_arcb();
+
+        // tamper magic
+        tamp_arcb[0] = 17;
+        let ret = AttestationRequest::decrypt_bin(&tamp_arcb, &arpk);
+        assert!(matches!(ret, Err(Error::NoArcb)));
+    }
+
+    #[test]
+    fn decrypt_bin_fail_magic_v2() {
+        let arpk = SymKey::Aes256(ARPK.into());
+        let mut tamp_arcb = mk_arcb_v2();
 
         // tamper magic
         tamp_arcb[0] = 17;
@@ -500,9 +683,35 @@ mod test {
     }
 
     #[test]
+    fn decrypt_bin_fail_mai_v2() {
+        let arpk = SymKey::Aes256(ARPK.into());
+        let mut tamp_arcb = mk_arcb_v2();
+
+        // tamper MAI
+        tamp_arcb[0x3b] = 17;
+        let ret = AttestationRequest::decrypt_bin(&tamp_arcb, &arpk);
+        println!("{ret:?}");
+        assert!(matches!(
+            ret,
+            Err(Error::PvCore(pv_core::Error::BinArcbInvAlgorithm(17)))
+        ));
+    }
+
+    #[test]
     fn decrypt_bin_fail_aad() {
         let arpk = SymKey::Aes256(ARPK.into());
         let mut tamp_arcb = mk_arcb();
+
+        // tamper AAD
+        tamp_arcb[0x3c] = 17;
+        let ret = AttestationRequest::decrypt_bin(&tamp_arcb, &arpk);
+        assert!(matches!(ret, Err(Error::GcmTagMismatch)));
+    }
+
+    #[test]
+    fn decrypt_bin_fail_aad_v2() {
+        let arpk = SymKey::Aes256(ARPK.into());
+        let mut tamp_arcb = mk_arcb_v2();
 
         // tamper AAD
         tamp_arcb[0x3c] = 17;

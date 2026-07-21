@@ -11,6 +11,8 @@ use pv::request::MagicValue;
 use pv::uv::{AttestationCmd, ConfigUid};
 use zerocopy::{BigEndian, ByteOrder, FromBytes, Immutable, IntoBytes, KnownLayout, U32, U64};
 
+use crate::additional;
+
 const INV_EXCHANGE_FMT_ERROR_TEXT: &str = "The input has not the correct format:";
 
 #[repr(C)]
@@ -99,10 +101,18 @@ impl ExchangeFormatV1Hdr {
         let measurement_entry = Entry::from_exp(Some(measurement));
         let exp_add = match additional {
             0 => None,
-            size => Some(size),
+            size => {
+                if size > AttestationCmd::ADDITIONAL_MAX_SIZE {
+                    bail!(
+                        "Additional data size ({}) exceeds maximum allowed size ({})",
+                        size,
+                        AttestationCmd::ADDITIONAL_MAX_SIZE
+                    );
+                }
+                Some(size)
+            }
         };
-        // TODO min and max size check?
-        let additional_entry = Entry::from_exp(exp_add); //, AttestationCmd::ADDITIONAL_MAX_SIZE, &mut offset);
+        let additional_entry = Entry::from_exp(exp_add);
         let user_entry = Entry::from_none();
         let cuid_entry = Entry::from_none();
 
@@ -530,7 +540,6 @@ impl ExchangeFormatResponse {
             "{INV_EXCHANGE_FMT_ERROR_TEXT} Contains no attestation request.",
         ))?;
 
-        // TODO remove unwrap
         let measurement = hdr.measurement.read(reader)?.data().ok_or(anyhow!(
             "{INV_EXCHANGE_FMT_ERROR_TEXT} Contains no attestation response (Measurement missing).",
         ))?;
@@ -691,6 +700,50 @@ mod test {
     #[test]
     fn invalid_req() {
         ExchangeFormatRequest::new(ARCB.to_vec(), 0, ADDITIONAL.len() as u32).unwrap_err();
+    }
+
+    #[test]
+    fn test_additional_data_size_validation() {
+        // Test for TODO 1 fix: Additional data size validation
+        let arcb = ARCB.to_vec();
+
+        // Test with valid size at maximum
+        let result = ExchangeFormatV1Hdr::new_request(
+            &arcb,
+            MEASUREMENT.len() as u32,
+            AttestationCmd::ADDITIONAL_MAX_SIZE,
+        );
+        assert!(
+            result.is_ok(),
+            "Maximum additional data size should be accepted"
+        );
+
+        // Test with size exceeding maximum
+        let result = ExchangeFormatV1Hdr::new_request(
+            &arcb,
+            MEASUREMENT.len() as u32,
+            AttestationCmd::ADDITIONAL_MAX_SIZE + 1,
+        );
+        assert!(
+            result.is_err(),
+            "Additional data size exceeding maximum should fail"
+        );
+
+        if let Err(e) = result {
+            let error_msg = e.to_string();
+            assert!(
+                error_msg.contains("exceeds maximum"),
+                "Error should mention exceeding maximum: {}",
+                error_msg
+            );
+        }
+
+        // Test with zero size (no additional data)
+        let result = ExchangeFormatV1Hdr::new_request(&arcb, MEASUREMENT.len() as u32, 0);
+        assert!(
+            result.is_ok(),
+            "Zero additional data size should be accepted"
+        );
     }
 
     #[test]
