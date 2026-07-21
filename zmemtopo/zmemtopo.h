@@ -68,9 +68,9 @@ struct diag310_t_hdr {
 } __packed;
 
 struct diag310_p_hdr {
-	char			pname[8];	/* partition name */
-	uint8_t			pn;		/* partition number */
-	uint8_t			tie;		/* count of entries following this header */
+	char			pname[LPAR_NAME_LEN];	/* partition name */
+	uint8_t			pn;			/* partition number */
+	uint8_t			tie;			/* count of entries following this header */
 	uint16_t		reserved1;
 	uint32_t		reserved2;
 } __packed;
