@@ -62,15 +62,11 @@ static void parse_nesting_level(char *arg)
 
 static void parse_sort_field(char *arg)
 {
-	char *s;
-
-	s = util_strdup(arg);
-	util_strstrip(s);
-	if (strcasecmp(s, "nr") == 0)
+	if (strcasecmp(arg, "nr") == 0)
 		g.sort_field = SORT_NR;
-	else if (strcasecmp(s, "lpar") == 0)
+	else if (strcasecmp(arg, "lpar") == 0)
 		g.sort_field = SORT_NAME;
-	else if (strcasecmp(s, "size") == 0)
+	else if (strcasecmp(arg, "size") == 0)
 		g.sort_field = SORT_SIZE;
 	else
 		errx(EXIT_FAILURE, "%s is not a valid sort field option", arg);
@@ -313,7 +309,6 @@ static void topology_entries_add_entry(struct topology_entry *entry,
 static void partition_set_name(struct partition *part, char *pname)
 {
 	ebcdic_to_ascii(pname, part->part_name, LPAR_NAME_LEN);
-	util_strstrip(part->part_name);
 }
 
 static void partition_add_entry(struct partition *part,
