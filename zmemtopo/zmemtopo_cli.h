@@ -37,6 +37,10 @@ static struct util_opt opt_vec[] = {
 		.argument = "FIELD",
 		.desc = "Sort view by FIELD (nr, lpar, size)"
 	}, {
+		.option = { "partition-filter", required_argument, NULL, 'p' },
+		.argument = "SUBSTRING",
+		.desc = "Filter partitions by name substring (case-insensitive)"
+	}, {
 		.option = { "ascii", no_argument, NULL, 'i' },
 		.desc = "Use only ASCII characters",
 	},

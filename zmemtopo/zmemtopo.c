@@ -46,6 +46,7 @@ static struct zmemtopo_globals {
 	unsigned int sort_field;
 	unsigned int ascii;
 	unsigned int fmt_specified;
+	char *partition_filter;
 	enum util_fmt_t format;
 	enum util_fmt_flags_t fmt_flags;
 } g;
@@ -115,6 +116,9 @@ static void parse_args(int argc, char *argv[])
 			break;
 		case 's':
 			parse_sort_field(optarg);
+			break;
+		case 'p':
+			g.partition_filter = optarg;
 			break;
 		case 'i':
 			g.ascii = 1;
@@ -483,6 +487,22 @@ static void partition_list_sort(struct partitions *parts)
 	}
 }
 
+static int partition_filter_matches(struct partition *part)
+{
+	int result;
+
+	if (!part)
+		return 0;
+	if (!g.partition_filter)
+		return 1;
+	if (!strlen(g.partition_filter))
+		return 1;
+	result = 0;
+	if (strcasestr(part->part_name, g.partition_filter))
+		result = 1;
+	return result;
+}
+
 static unsigned int find_entry_cell_size(struct partitions *parts)
 {
 	unsigned int max_digit, max_increment;
@@ -597,8 +617,11 @@ static void table_print(struct partitions *parts)
 	vdata->entry_len = find_entry_cell_size(parts);
 	partition_list_calculate_level_lengths(parts, vdata);
 	table_print_header(table, vdata);
-	util_list_iterate(parts->list, cur)
+	util_list_iterate(parts->list, cur) {
+		if (!partition_filter_matches(cur))
+			continue;
 		table_print_row(table, cur, vdata);
+	}
 	printf("%s\n", *table);
 	printf("Increment size: %lu%s\n", unit.size / unit.scale, unit.suffix);
 	free(vdata);
@@ -716,6 +739,8 @@ static void tree_create(char **tree, struct partitions *parts,
 	unit = vdata->unit;
 	tree_create_header(tree, vdata);
 	util_list_iterate(parts->list, cur) {
+		if (!partition_filter_matches(cur))
+			continue;
 		util_concatf(tree, "%-*s", vdata->cell_len, cur->part_name);
 		part_size = cur->increment_total * unit.size / unit.scale;
 		concat_w_padding(tree, vdata->entry_len, 0, "%u%s", part_size,
@@ -737,7 +762,9 @@ static unsigned int is_increment_at(struct partitions *parts,
 	else
 		next = util_list_next(parts->list, cur);
 	for (; next; next = util_list_next(parts->list, next)) {
-		if (next->entries[level - 1].increments[idx])
+		if (!next->entries[level - 1].increments[idx])
+			continue;
+		if (partition_filter_matches(next))
 			return 1;
 	}
 	return 0;
@@ -772,6 +799,8 @@ static void rtree_print_parts(char **buf, struct partitions *parts,
 	unit = vdata->unit;
 	flag_idx = (g.max_level - level) + 1;
 	util_list_iterate(parts->list, cur) {
+		if (!partition_filter_matches(cur))
+			continue;
 		entries = &cur->entries[level - 1];
 		if (!entries->increments[idx])
 			continue;
@@ -787,6 +816,21 @@ static void rtree_print_parts(char **buf, struct partitions *parts,
 		if (vdata->end_flag[flag_idx])
 			break;
 	}
+}
+
+static unsigned int rtree_is_last_entry(struct partitions *parts, unsigned int idx,
+					unsigned int level, unsigned int end)
+{
+	unsigned int tidx;
+
+	if (g.partition_filter && !g.tree_full) {
+		for (tidx = idx + 1; tidx < end; tidx++) {
+			if (is_increment_at(parts, NULL, level, tidx))
+				return 0;
+		}
+		return 1;
+	}
+	return (idx + 1) == end;
 }
 
 static void rtree_level_to_part(char **buf, struct partitions *parts,
@@ -807,7 +851,8 @@ static void rtree_level_to_part(char **buf, struct partitions *parts,
 		if (!is_increment_at(parts, NULL, level, idx) && !g.tree_full)
 			continue;
 		indent = 0;
-		vdata->end_flag[flag_idx] = (idx + 1) == end;
+		vdata->end_flag[flag_idx] = rtree_is_last_entry(parts, idx,
+								level, end);
 		if (level != g.max_level)
 			indent = tree_add_indent(buf, level, vdata->end_flag);
 		concat_w_padding(buf, vdata->cell_len - indent, 1, "LEVEL%u_%u",
