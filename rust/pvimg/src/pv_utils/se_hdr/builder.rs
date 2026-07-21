@@ -5,6 +5,7 @@
 use pv::request::Confidential;
 
 use super::hdr_v1::SeHdrDataV1;
+use super::hdr_v2::SeHdrDataV2;
 use super::{EffectiveControlFlags, SeHdr, SeHdrFlag};
 use crate::pv_utils::error::{Error, Result};
 use crate::pv_utils::se_hdr::brb::{
@@ -18,7 +19,7 @@ use crate::pv_utils::uvdata_builder::{
 use crate::pv_utils::PSW;
 
 /// `SeHdrBuilder`
-pub type SeHdrBuilder<'a> = UvDataBuilder<'a, SeHdrPlain>;
+pub type SeHdrBuilder<'a> = UvDataBuilder<SeHdrPlain>;
 
 impl SeHdrBuilder<'_> {
     pub fn new<M: Into<ComponentMetadata>>(
@@ -39,6 +40,19 @@ impl SeHdrBuilder<'_> {
                 let priv_key = data.generate_private_key()?;
                 data.set_cust_public_key(&priv_key)?;
                 (SeHdrData::SeHdrDataV1(data), aead_key, priv_key)
+            }
+            SeHdrVersion::V2 => {
+                let mut data = SeHdrDataV2::new(
+                    psw,
+                    components_meta
+                        .into()
+                        .try_into()
+                        .map_err(|_| Error::InvalidComponentMetadata)?,
+                )?;
+                let aead_key = data.generate_aead_key()?;
+                let priv_key = data.generate_private_key()?;
+                data.set_cust_public_key(&priv_key)?;
+                (SeHdrData::SeHdrDataV2(data), aead_key, priv_key)
             }
         };
         let common = SeHdrCommon::new(version);
@@ -95,8 +109,8 @@ impl BuilderTrait for SeHdrBuilder<'_> {
 mod tests {
     use std::io::Cursor;
 
-    use pv::request::{Confidential, SymKeyType, SHA_512_HASH_LEN};
-    use pv::test_utils::get_test_key_and_cert;
+    use pv::request::{Confidential, HostKey, HybridPKey, SymKeyType, SHA_512_HASH_LEN};
+    use pv::test_utils::{get_test_key_and_cert, get_test_key_and_cert_hybrid};
 
     use super::*;
     use crate::pv_utils::se_hdr::ComponentMetadataV1;
@@ -108,7 +122,7 @@ mod tests {
         use pv::test_utils::get_test_key_and_cert;
 
         let (cust_key, host_key) = get_test_key_and_cert();
-        let host_keys = [host_key.public_key().unwrap()];
+        let host_keys = [HostKey::V1(host_key.public_key().unwrap())];
         let xts_key = Confidential::new([0x3; SymKeyType::AES_256_XTS_KEY_LEN]);
         let xts_key2 = Confidential::new([0x3; SymKeyType::AES_256_XTS_KEY_LEN]);
         let mut builder = SeHdrBuilder::new(
@@ -237,9 +251,139 @@ mod tests {
     }
 
     #[test]
+    fn builder_test_v2() {
+        use pv::test_utils::get_test_key_and_cert_hybrid;
+
+        let (cust_key, host_key1, host_key2) = get_test_key_and_cert_hybrid();
+        let host_keys = [HostKey::V2(
+            HybridPKey::new(
+                host_key1.public_key().unwrap(),
+                host_key2.public_key().unwrap(),
+            )
+            .unwrap(),
+        )];
+        let xts_key = Confidential::new([0x3; SymKeyType::AES_256_XTS_KEY_LEN]);
+        let xts_key2 = Confidential::new([0x3; SymKeyType::AES_256_XTS_KEY_LEN]);
+        let mut builder = SeHdrBuilder::new(
+            SeHdrVersion::V2,
+            PSW {
+                addr: 1234,
+                mask: 5678,
+            },
+            ComponentMetadata::ComponentMetadataV1(ComponentMetadataV1 {
+                ald: [0x1; SHA_512_HASH_LEN],
+                pld: [0x2; SHA_512_HASH_LEN],
+                tld: [0x3; SHA_512_HASH_LEN],
+                nep: 1,
+                key: xts_key,
+            }),
+        )
+        .expect("should not fail");
+
+        //        builder.add_comp_data(addr, tweak, )?;
+        builder
+            .with_components(ComponentMetadataV1 {
+                ald: [0x1; SHA_512_HASH_LEN],
+                pld: [0x2; SHA_512_HASH_LEN],
+                tld: [0x3; SHA_512_HASH_LEN],
+                nep: 1,
+                key: xts_key2,
+            })
+            .expect("should not fail");
+        builder
+            .with_priv_key(&cust_key)
+            .expect_err("Error expected as expert mode is not enabled");
+
+        builder.expert_mode = true;
+        builder.with_priv_key(&cust_key).expect("should not fail");
+
+        // Set CCK
+        // Too large key
+        builder
+            .with_cck([49; SymKeyType::AES_256_GCM_KEY_LEN - 1].to_vec().into())
+            .expect_err("should fail");
+        // Too small key
+        builder
+            .with_cck([49; SymKeyType::AES_256_GCM_KEY_LEN + 1].to_vec().into())
+            .expect_err("should fail");
+
+        builder
+            .with_cck([49; SymKeyType::AES_256_GCM_KEY_LEN].to_vec().into())
+            .expect("should not fail");
+
+        // Set protection key
+        // Too large key
+        builder
+            .with_aead_key(Confidential::new([50; 33].into()))
+            .expect_err("should fail");
+        // Too small key
+        builder
+            .with_aead_key(Confidential::new([50; 31].into()))
+            .expect_err("should fail");
+
+        builder
+            .with_aead_key(Confidential::new([50; 32].into()))
+            .expect("should not fail");
+
+        // Set IV
+        // Too large IV
+        builder.with_iv(&[51; 13]).expect_err("should fail");
+        // Too small IV
+        builder.with_iv(&[51; 11]).expect_err("should fail");
+
+        builder.with_iv(&[51; 12]).expect("should not fail");
+
+        builder.add_hostkeys(&host_keys).expect("should not fail");
+
+        let prot_key = builder.prot_key().clone();
+        let bin = builder.build().expect("wuhu");
+        assert_eq!(bin.common.version, SeHdrVersion::V2);
+        assert_eq!(bin.as_bytes().expect("should not fail").len(), 2240);
+        assert_eq!(
+            bin.as_bytes().expect("should not fail")[..480],
+            [
+                73, 66, 77, 83, 101, 99, 69, 120, 0, 0, 2, 0, 0, 0, 8, 192, 51, 51, 51, 51, 51, 51,
+                51, 51, 51, 51, 51, 51, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+                128, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 199, 93, 52, 249, 22, 82, 219, 69, 123, 11, 32, 156, 70, 164, 145,
+                164, 78, 226, 177, 110, 35, 194, 216, 218, 241, 22, 103, 138, 98, 242, 76, 227, 50,
+                197, 153, 95, 8, 69, 107, 102, 177, 109, 213, 90, 146, 197, 7, 241, 227, 26, 247,
+                140, 100, 168, 46, 122, 84, 27, 21, 19, 80, 21, 242, 2, 134, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 1, 64, 128, 88, 167, 241, 165, 195, 80, 151, 83, 58, 2, 169,
+                56, 121, 231, 222, 103, 186, 40, 11, 206, 131, 101, 236, 148, 178, 185, 8, 245,
+                137, 195, 169, 152, 216, 190, 30, 99, 7, 215, 74, 224, 26, 220, 70, 130, 95, 246,
+                187, 111, 160, 92, 17, 71, 207, 226, 204, 244, 162, 79, 61, 131, 61, 218, 112, 2,
+                2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+                2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+                2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+                3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+                3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 255, 94, 191,
+                53, 220, 196, 47, 37, 93, 227, 234, 101, 1, 174, 171, 68, 42, 136, 92, 238, 72, 6,
+                17, 77, 231, 225, 174, 22, 222, 188, 212, 15, 248, 145, 72, 126, 139, 17, 233, 225,
+                156, 46, 233, 151, 54, 2, 175, 88, 215, 254, 243, 222, 37, 81, 50, 110, 18, 76,
+                252, 12, 210, 146, 66, 23
+            ][..480]
+        );
+
+        let decrypted = bin.decrypt(&prot_key).expect("BUG");
+        assert_eq!(bin.common, decrypted.common);
+        assert_eq!(
+            bin.aad().expect("should not fail"),
+            decrypted.aad().expect("should not fail")
+        );
+        assert_ne!(
+            &bin.data(),
+            decrypted.data().expect("should not fail").value()
+        );
+        let _decrypted_hdrv2: SeHdrDataV2 = decrypted.data.try_into().expect("BUG");
+    }
+
+    #[test]
     fn chain_test() {
         let (_, host_key) = get_test_key_and_cert();
-        let host_keys = [host_key.public_key().unwrap()];
+        let host_keys = [HostKey::V1(host_key.public_key().unwrap())];
         let xts_key = Confidential::new([0x3; SymKeyType::AES_256_XTS_KEY_LEN]);
         let meta = ComponentMetadataV1 {
             ald: [0x1; SHA_512_HASH_LEN],
@@ -273,5 +417,50 @@ mod tests {
         assert_eq!(hdr_plain.common.version, SeHdrVersion::V1);
         assert_eq!(hdr_plain.common.version, hdr.common.version);
         let _hdr_data_v1: SeHdrDataV1 = hdr_plain.data.try_into().expect("should not fail");
+    }
+
+    #[test]
+    fn chain_test_v2() {
+        let (_, host_key1, host_key2) = get_test_key_and_cert_hybrid();
+        let host_keys = [HostKey::V2(
+            HybridPKey::new(
+                host_key1.public_key().unwrap(),
+                host_key2.public_key().unwrap(),
+            )
+            .unwrap(),
+        )];
+        let xts_key = Confidential::new([0x3; SymKeyType::AES_256_XTS_KEY_LEN]);
+        let meta = ComponentMetadataV1 {
+            ald: [0x1; SHA_512_HASH_LEN],
+            pld: [0x2; SHA_512_HASH_LEN],
+            tld: [0x3; SHA_512_HASH_LEN],
+            nep: 3,
+            key: xts_key,
+        };
+        let cck = Confidential::new([0x42; 32].to_vec());
+        let mut builder = SeHdrBuilder::new(
+            SeHdrVersion::V2,
+            PSW {
+                addr: 1234,
+                mask: 5678,
+            },
+            meta,
+        )
+        .expect("should not fail");
+
+        let prot_key = builder.prot_key().to_owned();
+        builder
+            .add_hostkeys(&host_keys)
+            .expect("should not fail")
+            .with_cck(cck)
+            .expect("should not fail");
+        let bin = builder.build().expect("should not fail");
+
+        let reader = Cursor::new(bin.as_bytes().expect("should not fail"));
+        let hdr = SeHdr::try_from_io(reader).unwrap();
+        let hdr_plain = hdr.decrypt(&prot_key).unwrap();
+        assert_eq!(hdr_plain.common.version, SeHdrVersion::V2);
+        assert_eq!(hdr_plain.common.version, hdr.common.version);
+        let _hdr_data_v2: SeHdrDataV2 = hdr_plain.data.try_into().expect("should not fail");
     }
 }

@@ -20,8 +20,8 @@ pub use psw::{ShortPsw, PSW, PSW_MASK_BA, PSW_MASK_EA};
 pub use se_hdr::{
     ComponentMetadataV1, ControlFlagTrait, EffectiveControlFlags, EnvelopeSeHdrV1, FlagData,
     FlagState, FlagsOverride, IntoEnumIterator, SeH, SeHdr, SeHdrAadV1, SeHdrBinV1, SeHdrBuilder,
-    SeHdrControlFlags, SeHdrControlFlagsModel, SeHdrData, SeHdrDataV1, SeHdrFlag, SeHdrPlain,
-    SeHdrVersion, SeHdrVersioned, SeTarget,
+    SeHdrControlFlags, SeHdrControlFlagsModel, SeHdrData, SeHdrDataV1, SeHdrDataV2, SeHdrFlag,
+    SeHdrPlain, SeHdrVersion, SeHdrVersioned, SeTarget,
 };
 pub use secured_comp::{ComponentTrait, SecuredComponent, SecuredComponentBuilder};
 pub use serializing::{bytesize, serialize_to_bytes};

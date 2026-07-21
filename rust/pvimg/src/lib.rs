@@ -39,8 +39,9 @@ pub mod uvdata {
         AeadPlainDataTrait, BuilderTrait, ComponentMetadataV1, ControlFlagTrait,
         EffectiveControlFlags, EnvelopeSeHdrV1, FlagData, FlagState, FlagsOverride,
         IntoEnumIterator, KeyExchangeTrait, SeH, SeHdr, SeHdrAadV1, SeHdrBinV1, SeHdrBuilder,
-        SeHdrControlFlags, SeHdrControlFlagsModel, SeHdrData, SeHdrDataV1, SeHdrFlag, SeHdrPlain,
-        SeHdrVersion, SeHdrVersioned, SeTarget, UvDataPlainTrait, UvDataTrait, UvKeyHashesV1,
+        SeHdrControlFlags, SeHdrControlFlagsModel, SeHdrData, SeHdrDataV1, SeHdrDataV2, SeHdrFlag,
+        SeHdrPlain, SeHdrVersion, SeHdrVersioned, SeTarget, UvDataPlainTrait, UvDataTrait,
+        UvKeyHashesV1,
     };
 }
 

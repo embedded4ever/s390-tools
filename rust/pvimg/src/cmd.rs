@@ -8,7 +8,7 @@ mod info;
 mod test;
 mod version;
 
-pub const CMD_FN: &[&str] = &["+create", "+test", "+info"];
+pub const CMD_FN: &[&str] = &["+create", "+test", "+info", "+quantumsafe"];
 
 pub use create::create;
 pub use info::info;

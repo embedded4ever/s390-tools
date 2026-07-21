@@ -6,9 +6,9 @@ use std::path::Path;
 
 use anyhow::Result;
 use log::{info, warn};
-use pv::misc::{open_file, read_certs, read_file};
+use pv::misc::{open_file, read_hkd};
 use pv::{FileAccessErrorType, PvCoreError};
-use pvimg::error::{Error, OwnExitCode, PvError};
+use pvimg::error::{Error, OwnExitCode};
 use pvimg::uvdata::{KeyExchangeTrait, SeHdr, UvKeyHashesV1};
 use utils::HexSlice;
 
@@ -72,27 +72,17 @@ where
 
     let mut result = false;
     for path in host_key_documents {
-        let hkd_path = path.as_ref();
-        let hkd_data = read_file(hkd_path, "host key document")?;
-        let certs = read_certs(&hkd_data)?;
-        if certs.is_empty() {
-            return Err(PvError::NoHkdInFile(hkd_path.display().to_string()).into());
-        }
-
-        if certs.len() != 1 {
-            warn!("The host key document in '{}' contains more than one certificate! Only the first certificate will be used.",
-                  hkd_path.display());
-        }
-
-        // Panic: len is == 1 -> unwrap will succeed/not panic
-        let cert = certs.first().unwrap();
-        if hdr.contains(cert.public_key()?)? {
+        let hkd = read_hkd(path)?;
+        if hdr.contains(hkd)? {
             result = true;
-            log_println!(" ✓ Host key document '{}' is included", hkd_path.display());
+            log_println!(
+                " ✓ Host key document '{}' is included",
+                path.as_ref().display()
+            );
         } else {
             log_println!(
                 " ✘ Host key document '{}' is not included",
-                hkd_path.display()
+                path.as_ref().display()
             );
         }
     }

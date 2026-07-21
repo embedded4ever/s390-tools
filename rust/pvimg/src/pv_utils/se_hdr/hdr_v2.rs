@@ -1,38 +1,39 @@
 // SPDX-License-Identifier: MIT
 //
-// Copyright IBM Corp. 2024
+// Copyright IBM Corp. 2026
 use std::fmt::Display;
 use std::mem::{size_of, size_of_val};
 
-use base64::prelude::*;
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use deku::ctx::Endian;
 use deku::prelude::*;
 use openssl::nid::Nid;
 use openssl::pkey::{PKeyRef, Public};
 use pv::request::openssl::pkey::{PKey, Private};
 use pv::request::{
-    gen_ec_key, random_array, Aes256XtsKey, Confidential, EcPubKeyCoord, Encrypt, HostKey, Keyslot,
+    gen_ec_key, random_array, Aes256XtsKey, Confidential, EcPubKeyCoord, HybridPKey, KeyslotV2,
     SymKey, SymKeyType, Zeroize, SHA_512_HASH_LEN,
 };
 use serde::{Deserialize, Serialize};
 use utils::HexSlice;
 
-use super::keys::phkh_v1;
+use super::keys::phkh_v2;
 use super::{EffectiveControlFlags, SeHdrControlFlags};
 use crate::error::Error;
-use crate::misc::PAGESIZE;
 use crate::pv_utils::error::Result;
 use crate::pv_utils::misc::display_indented;
 use crate::pv_utils::se_hdr::brb::{
     ComponentMetadata, ComponentMetadataV1, SeHdrCommon, SeHdrConfBuilderTrait, SeHdrPlainTrait,
     SeHdrPubBuilderTrait, SeHdrTrait,
 };
-use crate::pv_utils::se_hdr::keys::{BinaryKeySlotV1, EcPubKeyCoordV1};
+use crate::pv_utils::se_hdr::keys::{BinaryKeySlotV2, EcPubKeyCoordV1};
 use crate::pv_utils::serializing::{
     bytesize, bytesize_confidential, confidential_read_slice, confidential_write_slice,
     serde_base64, serde_hex_array, serde_hex_confidential_array, serde_hex_left_padded_u64,
     serialize_to_bytes,
 };
+use crate::pv_utils::uv_keys::UvKeyHashV1;
 use crate::pv_utils::uvdata::{
     AeadCipherTrait, AeadDataTrait, AeadPlainDataTrait, KeyExchangeTrait, UvDataPlainTrait,
     UvDataTrait,
@@ -41,15 +42,15 @@ use crate::pv_utils::uvdata_builder::{AeadCipherBuilderTrait, KeyExchangeBuilder
 use crate::pv_utils::{try_copy_slice_to_array, SeHdrFlag, SeTarget, PSW};
 
 #[derive(Debug)]
-struct HdrSizesV1 {
+struct HdrSizesV2 {
     pub phs: u64,
     pub sea: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, DekuRead, DekuWrite, Serialize, Deserialize)]
 #[deku(endian = "endian", ctx = "endian: Endian", ctx_default = "Endian::Big")]
-pub struct SeHdrAadV1 {
-    #[deku(assert = "*sehs <= SeHdrDataV1::MAX_SIZE.try_into().unwrap()")]
+pub struct SeHdrAadV2 {
+    #[deku(assert = "*sehs <= SeHdrDataV2::MAX_SIZE.try_into().unwrap()")]
     pub sehs: u32,
     #[serde(with = "serde_hex_array", rename = "iv_hex")]
     pub iv: [u8; SymKeyType::AES_256_GCM_IV_LEN],
@@ -70,14 +71,14 @@ pub struct SeHdrAadV1 {
     #[serde(with = "serde_hex_array", rename = "tld_hex")]
     pub tld: [u8; SHA_512_HASH_LEN],
     #[deku(count = "nks")]
-    pub keyslots: Vec<BinaryKeySlotV1>,
+    pub keyslots: Vec<BinaryKeySlotV2>,
 }
 
-impl SeHdrAadV1 {
+impl SeHdrAadV2 {
     const KEY_TYPE: SymKeyType = SymKeyType::Aes256Gcm;
 }
 
-impl Display for SeHdrAadV1 {
+impl Display for SeHdrAadV2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Support verbose mode if the `alternate` (`{:#}`) flag is used.
         if f.alternate() {
@@ -99,15 +100,15 @@ impl Display for SeHdrAadV1 {
         writeln!(
             f,
             "plaintext control flags:\n{}",
-            SeHdrControlFlags::from_u64(self.pcf, SeTarget::V1Max, true)
+            SeHdrControlFlags::from_u64(self.pcf, SeTarget::V2Max, true)
         )?;
         Ok(())
     }
 }
 
-impl KeyExchangeTrait for SeHdrAadV1 {
+impl KeyExchangeTrait for SeHdrAadV2 {
     type PrivateKeyType = PKey<Private>;
-    type TargetKeyType = PKeyRef<Public>;
+    type TargetKeyType = HybridPKey;
 
     fn cust_pub_key(&mut self) -> Result<PKey<Public>> {
         self.cust_pub_key.clone().try_into()
@@ -118,27 +119,25 @@ impl KeyExchangeTrait for SeHdrAadV1 {
     }
 
     fn contains_hash<H: AsRef<[u8]>>(&self, hash: H) -> bool {
-        for slot in &self.keyslots {
-            if hash.as_ref() != slot.phkh {
-                continue;
-            }
-            return true;
-        }
-        false
+        let hash = hash.as_ref();
+        self.keyslots
+            .iter()
+            .any(|ks| &ks.phkh[..UvKeyHashV1::UV_KEY_HASH_SIZE] == hash)
     }
 
     fn contains<K>(&self, key: K) -> Result<bool>
     where
         K: AsRef<Self::TargetKeyType>,
     {
-        let phkh = phkh_v1(key)?;
+        let key = key.as_ref();
+        let phkh = phkh_v2(key)?;
         Ok(self.contains_hash(phkh))
     }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, DekuRead, DekuWrite, Serialize, Deserialize)]
 #[deku(endian = "endian", ctx = "endian: Endian", ctx_default = "Endian::Big")]
-pub struct SeHdrConfV1 {
+pub struct SeHdrConfV2 {
     #[serde(with = "serde_hex_confidential_array", rename = "cck_hex")]
     #[deku(
         reader = "confidential_read_slice(deku::reader, endian)",
@@ -164,7 +163,7 @@ pub struct SeHdrConfV1 {
     opt_items: Vec<u8>,
 }
 
-impl Zeroize for SeHdrConfV1 {
+impl Zeroize for SeHdrConfV2 {
     fn zeroize(&mut self) {
         self.cck.zeroize();
         self.xts.zeroize();
@@ -176,12 +175,12 @@ impl Zeroize for SeHdrConfV1 {
     }
 }
 
-impl Display for SeHdrConfV1 {
+impl Display for SeHdrConfV2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
             "secret control flags:\n{}",
-            SeHdrControlFlags::from_u64(self.scf, SeTarget::V1Max, false)
+            SeHdrControlFlags::from_u64(self.scf, SeTarget::V2Max, false)
         )?;
 
         // Support verbose mode if the `alternate` (`{:#}`) flag is used.
@@ -197,25 +196,25 @@ impl Display for SeHdrConfV1 {
 
 #[derive(Default, PartialEq, Eq, Debug, Clone, DekuRead, DekuWrite, Serialize, Deserialize)]
 #[deku(endian = "endian", ctx = "endian: Endian", ctx_default = "Endian::Big")]
-pub struct SeHdrTagV1 {
+pub struct SeHdrTagV2 {
     #[serde(with = "serde_hex_array", rename = "tag_hex")]
     tag: [u8; SymKeyType::AES_256_GCM_TAG_LEN],
 }
 
-impl Display for SeHdrTagV1 {
+impl Display for SeHdrTagV2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:}", HexSlice::from(&self.tag))
     }
 }
 
-mod ser_confidential_confv1 {
+mod ser_confidential_confv2 {
     use pv::request::Confidential;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    use super::SeHdrConfV1;
+    use super::SeHdrConfV2;
 
     pub fn serialize<S: Serializer>(
-        encrypted: &Confidential<SeHdrConfV1>,
+        encrypted: &Confidential<SeHdrConfV2>,
         ser: S,
     ) -> Result<S::Ok, S::Error> {
         encrypted.value().serialize(ser)
@@ -223,8 +222,8 @@ mod ser_confidential_confv1 {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<Confidential<SeHdrConfV1>, D::Error> {
-        let conf = SeHdrConfV1::deserialize(deserializer)?;
+    ) -> Result<Confidential<SeHdrConfV2>, D::Error> {
+        let conf = SeHdrConfV2::deserialize(deserializer)?;
         Ok(Confidential::new(conf))
     }
 }
@@ -232,20 +231,20 @@ mod ser_confidential_confv1 {
 /// Secure Execution Header definition
 #[derive(Debug, Clone, PartialEq, Eq, DekuRead, DekuWrite, Serialize, Deserialize)]
 #[deku(endian = "big")]
-pub struct SeHdrDataV1 {
+pub struct SeHdrDataV2 {
     #[serde(flatten)]
-    pub aad: SeHdrAadV1,
-    #[serde(flatten, with = "ser_confidential_confv1")]
+    pub aad: SeHdrAadV2,
+    #[serde(flatten, with = "ser_confidential_confv2")]
     #[deku(
-        reader = "confidential_read_sehdrconf_v1(deku::reader)",
-        writer = "confidential_write_sehdrconf_v1(data, deku::writer)"
+        reader = "confidential_read_sehdrconf_v2(deku::reader)",
+        writer = "confidential_write_sehdrconf_v2(data, deku::writer)"
     )]
-    pub data: Confidential<SeHdrConfV1>,
+    pub data: Confidential<SeHdrConfV2>,
     #[serde(flatten)]
-    tag: SeHdrTagV1,
+    tag: SeHdrTagV2,
 }
 
-impl Display for SeHdrDataV1 {
+impl Display for SeHdrDataV2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Support verbose mode if the `alternate` (`{:#}`) flag is used.
         if f.alternate() {
@@ -260,19 +259,19 @@ impl Display for SeHdrDataV1 {
     }
 }
 
-/// Reads from a `reader` and creates a confidential `SeHdrConfV1`.
+/// Reads from a `reader` and creates a confidential `SeHdrConfV2`.
 ///
 /// # Errors
 ///
 /// This function will return an error if there was an I/O error or the
-/// `SeHdrConfV1` could not be constructed.
-fn confidential_read_sehdrconf_v1<R>(
+/// `SeHdrConfV2` could not be constructed.
+fn confidential_read_sehdrconf_v2<R>(
     reader: &mut Reader<R>,
-) -> Result<Confidential<SeHdrConfV1>, DekuError>
+) -> Result<Confidential<SeHdrConfV2>, DekuError>
 where
     R: std::io::Read + std::io::Seek,
 {
-    Ok(Confidential::new(SeHdrConfV1::from_reader_with_ctx(
+    Ok(Confidential::new(SeHdrConfV2::from_reader_with_ctx(
         reader,
         (),
     )?))
@@ -283,8 +282,8 @@ where
 /// # Errors
 ///
 /// This function will return an error if there was an I/O error.
-fn confidential_write_sehdrconf_v1<W>(
-    value: &Confidential<SeHdrConfV1>,
+fn confidential_write_sehdrconf_v2<W>(
+    value: &Confidential<SeHdrConfV2>,
     writer: &mut Writer<W>,
 ) -> Result<(), DekuError>
 where
@@ -293,12 +292,13 @@ where
     value.value().to_writer(writer, ())
 }
 
-impl SeHdrDataV1 {
-    const MAX_SIZE: usize = 2 * PAGESIZE;
+impl SeHdrDataV2 {
+    // For Linux kernel >= 7.0, this is 1 MiB
+    const MAX_SIZE: usize = 1024 * 1024;
     const PCF_DEFAULT: u64 = 0x0;
     const SCF_DEFAULT: u64 = 0x0;
 
-    /// Creates a new `SeHdrDataV1`. It initializes the CCK and IV with random
+    /// Creates a new `SeHdrDataV2`. It initializes the CCK and IV with random
     /// data.
     ///
     /// # Errors
@@ -309,7 +309,7 @@ impl SeHdrDataV1 {
         // Safety: The CCK is also 32 bytes large.
         let cck = SymKey::random(SymKeyType::Aes256Gcm)?.try_into().unwrap();
         let mut ret = Self {
-            aad: SeHdrAadV1 {
+            aad: SeHdrAadV2 {
                 sehs: 0,
                 pcf: Self::PCF_DEFAULT,
                 ald: components.ald,
@@ -323,7 +323,7 @@ impl SeHdrDataV1 {
                 cust_pub_key: EcPubKeyCoordV1 { coord: [0_u8; 160] },
                 keyslots: vec![],
             },
-            data: SeHdrConfV1 {
+            data: SeHdrConfV2 {
                 cck,
                 scf: Self::SCF_DEFAULT,
                 psw,
@@ -333,7 +333,7 @@ impl SeHdrDataV1 {
                 opt_items: vec![],
             }
             .into(),
-            tag: SeHdrTagV1::default(),
+            tag: SeHdrTagV2::default(),
         };
         let hdr_size = ret.size()?;
         let phs = hdr_size.phs.try_into()?;
@@ -348,7 +348,7 @@ impl SeHdrDataV1 {
         Ok(ret)
     }
 
-    fn size(&self) -> Result<HdrSizesV1> {
+    fn size(&self) -> Result<HdrSizesV2> {
         let sea = bytesize_confidential(&self.data)?;
         let mut phs = bytesize(&self.aad)?
             .checked_add(size_of::<SeHdrCommon>())
@@ -358,13 +358,13 @@ impl SeHdrDataV1 {
             .ok_or(Error::UnexpectedOverflow)?;
         phs = phs.checked_add(sea).ok_or(Error::UnexpectedOverflow)?;
 
-        Ok(HdrSizesV1 {
+        Ok(HdrSizesV2 {
             sea: sea.try_into()?,
             phs: phs.try_into()?,
         })
     }
 
-    /// Return the expected size of an constructed `SeHdrDataV1` with `n` key
+    /// Return the expected size of an constructed `SeHdrDataV2` with `n` key
     /// slots.
     ///
     /// # Errors
@@ -374,7 +374,7 @@ impl SeHdrDataV1 {
     pub fn expected_size(nks: usize) -> Result<usize> {
         let cck = [0x0; 32].into();
         let hdr = Self {
-            aad: SeHdrAadV1 {
+            aad: SeHdrAadV2 {
                 sehs: 0,
                 pcf: Self::PCF_DEFAULT,
                 ald: [0x0; SHA_512_HASH_LEN],
@@ -388,7 +388,7 @@ impl SeHdrDataV1 {
                 cust_pub_key: EcPubKeyCoordV1 { coord: [0_u8; 160] },
                 keyslots: vec![],
             },
-            data: SeHdrConfV1 {
+            data: SeHdrConfV2 {
                 cck,
                 scf: Self::SCF_DEFAULT,
                 psw: PSW { mask: 0, addr: 0 },
@@ -398,13 +398,13 @@ impl SeHdrDataV1 {
                 opt_items: vec![],
             }
             .into(),
-            tag: SeHdrTagV1::default(),
+            tag: SeHdrTagV2::default(),
         };
         let hdr_size: usize = hdr.size()?.phs.try_into().unwrap();
 
         hdr_size
             .checked_add(
-                size_of::<BinaryKeySlotV1>()
+                size_of::<BinaryKeySlotV2>()
                     .checked_mul(nks)
                     .ok_or(Error::UnexpectedOverflow)?,
             )
@@ -412,15 +412,38 @@ impl SeHdrDataV1 {
     }
 }
 
-impl UvDataPlainTrait for SeHdrDataV1 {
-    type C = SeHdrBinV1;
+impl UvDataPlainTrait for SeHdrDataV2 {
+    type C = SeHdrBinV2;
 }
-impl SeHdrPlainTrait for SeHdrDataV1 {}
+impl SeHdrPlainTrait for SeHdrDataV2 {}
 
-impl KeyExchangeBuilderTrait for SeHdrDataV1 {
+impl KeyExchangeBuilderTrait for SeHdrDataV2 {
     type AeadKeyType = SymKey;
     type PrivateKeyType = PKeyRef<Private>;
-    type TargetKeyType = PKeyRef<Public>;
+    type TargetKeyType = HybridPKey;
+
+    fn generate_private_key(&self) -> Result<PKey<Private>> {
+        Ok(gen_ec_key(Nid::SECP521R1)?)
+    }
+
+    fn set_cust_public_key(&mut self, key: &PKeyRef<Private>) -> Result<()> {
+        self.aad.cust_pub_key = TryInto::<EcPubKeyCoord>::try_into(key)?.into();
+        Ok(())
+    }
+
+    fn clear_keyslots(&mut self) -> Result<()> {
+        let old_nks: usize = self.aad.nks.try_into().unwrap();
+        let keyslot_bin_size = size_of::<BinaryKeySlotV2>();
+        self.aad.keyslots.clear();
+        self.aad.nks = 0;
+        self.aad.sehs -= u32::try_from(
+            old_nks
+                .checked_mul(keyslot_bin_size)
+                .ok_or(Error::UnexpectedOverflow)?,
+        )
+        .unwrap();
+        Ok(())
+    }
 
     fn add_keyslot(
         &mut self,
@@ -428,7 +451,7 @@ impl KeyExchangeBuilderTrait for SeHdrDataV1 {
         aead_key: &Self::AeadKeyType,
         priv_key: &Self::PrivateKeyType,
     ) -> Result<()> {
-        let keyslot = Keyslot::new(HostKey::V1(hostkey.to_owned()));
+        let keyslot = KeyslotV2::new(hostkey.clone());
         let keyslot_bin = keyslot.encrypt(aead_key.value(), priv_key)?.try_into()?;
         let keyslot_bin_size = u32::try_from(size_of_val(&keyslot_bin)).unwrap();
         self.aad.keyslots.push(keyslot_bin);
@@ -444,34 +467,11 @@ impl KeyExchangeBuilderTrait for SeHdrDataV1 {
             .ok_or(Error::UnexpectedOverflow)?;
         Ok(())
     }
-
-    fn generate_private_key(&self) -> Result<PKey<Private>> {
-        Ok(gen_ec_key(Nid::SECP521R1)?)
-    }
-
-    fn set_cust_public_key(&mut self, key: &PKeyRef<Private>) -> Result<()> {
-        self.aad.cust_pub_key = TryInto::<EcPubKeyCoord>::try_into(key)?.into();
-        Ok(())
-    }
-
-    fn clear_keyslots(&mut self) -> Result<()> {
-        let old_nks: usize = self.aad.nks.try_into().unwrap();
-        let keyslot_bin_size = size_of::<BinaryKeySlotV1>();
-        self.aad.keyslots.clear();
-        self.aad.nks = 0;
-        self.aad.sehs -= u32::try_from(
-            old_nks
-                .checked_mul(keyslot_bin_size)
-                .ok_or(Error::UnexpectedOverflow)?,
-        )
-        .unwrap();
-        Ok(())
-    }
 }
 
-impl KeyExchangeTrait for SeHdrDataV1 {
+impl KeyExchangeTrait for SeHdrDataV2 {
     type PrivateKeyType = PKey<Private>;
-    type TargetKeyType = PKeyRef<Public>;
+    type TargetKeyType = HybridPKey;
 
     fn cust_pub_key(&mut self) -> Result<PKey<Public>> {
         self.aad.cust_pub_key()
@@ -493,7 +493,7 @@ impl KeyExchangeTrait for SeHdrDataV1 {
     }
 }
 
-impl SeHdrConfBuilderTrait for SeHdrDataV1 {
+impl SeHdrConfBuilderTrait for SeHdrDataV2 {
     fn set_psw(&mut self, psw: &PSW) {
         self.data.value_mut().psw = psw.clone();
     }
@@ -513,7 +513,7 @@ impl SeHdrConfBuilderTrait for SeHdrDataV1 {
     }
 }
 
-impl SeHdrPubBuilderTrait for SeHdrDataV1 {
+impl SeHdrPubBuilderTrait for SeHdrDataV2 {
     fn set_pcf(&mut self, pcf: &EffectiveControlFlags<SeHdrFlag>) -> Result<()> {
         self.aad.pcf = pcf.to_u64();
         Ok(())
@@ -540,17 +540,35 @@ impl SeHdrPubBuilderTrait for SeHdrDataV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, DekuRead, DekuWrite, Serialize, Deserialize)]
 #[deku(endian = "big")]
-pub struct SeHdrBinV1 {
+pub struct SeHdrBinV2 {
     #[serde(flatten)]
-    pub aad: SeHdrAadV1,
+    pub aad: SeHdrAadV2,
     #[serde(with = "serde_base64", rename = "cipher_data_b64")]
     #[deku(bytes_read = "aad.sea")]
-    pub cipher_data: Vec<u8>,
+    pub data: Vec<u8>,
     #[serde(flatten)]
-    pub tag: SeHdrTagV1,
+    pub tag: SeHdrTagV2,
 }
 
-impl SeHdrBinV1 {
+impl Display for SeHdrBinV2 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Support verbose mode if the `alternate` (`{:#}`) flag is used.
+        if f.alternate() {
+            write!(f, "{:#}", self.aad)?;
+            writeln!(
+                f,
+                "encrypted data: {:#}",
+                BASE64_STANDARD.encode(&self.data)
+            )?;
+            writeln!(f, "GCM tag: {:#}", self.tag)?;
+        } else {
+            write!(f, "{}", self.aad)?;
+        }
+        Ok(())
+    }
+}
+
+impl SeHdrBinV2 {
     pub fn new(d: &[u8]) -> Result<Self> {
         Self::try_from_data(d)
     }
@@ -561,30 +579,12 @@ impl SeHdrBinV1 {
     }
 }
 
-impl Display for SeHdrBinV1 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Support verbose mode if the `alternate` (`{:#}`) flag is used.
-        if f.alternate() {
-            write!(f, "{:#}", self.aad)?;
-            writeln!(
-                f,
-                "encrypted data: {:#}",
-                BASE64_STANDARD.encode(&self.cipher_data)
-            )?;
-            writeln!(f, "GCM tag: {:#}", self.tag)?;
-        } else {
-            write!(f, "{}", self.aad)?;
-        }
-        Ok(())
-    }
+impl UvDataTrait for SeHdrBinV2 {
+    type P = SeHdrDataV2;
 }
+impl SeHdrTrait for SeHdrBinV2 {}
 
-impl UvDataTrait for SeHdrBinV1 {
-    type P = SeHdrDataV1;
-}
-impl SeHdrTrait for SeHdrBinV1 {}
-
-impl AeadCipherTrait for SeHdrBinV1 {
+impl AeadCipherTrait for SeHdrBinV2 {
     fn aead_key_type(&self) -> SymKeyType {
         self.key_type()
     }
@@ -598,16 +598,16 @@ impl AeadCipherTrait for SeHdrBinV1 {
     }
 }
 
-impl AeadCipherBuilderTrait for SeHdrDataV1 {
+impl AeadCipherBuilderTrait for SeHdrDataV2 {
     fn set_iv(&mut self, iv: &[u8]) -> Result<()> {
         self.aad.iv = try_copy_slice_to_array(iv)?;
         Ok(())
     }
 }
 
-impl KeyExchangeTrait for SeHdrBinV1 {
+impl KeyExchangeTrait for SeHdrBinV2 {
     type PrivateKeyType = PKey<Private>;
-    type TargetKeyType = PKeyRef<Public>;
+    type TargetKeyType = HybridPKey;
 
     fn cust_pub_key(&mut self) -> Result<PKey<Public>> {
         self.aad.cust_pub_key()
@@ -629,13 +629,13 @@ impl KeyExchangeTrait for SeHdrBinV1 {
     }
 }
 
-impl AeadDataTrait for SeHdrBinV1 {
+impl AeadDataTrait for SeHdrBinV2 {
     fn aad(&self) -> Result<Vec<u8>> {
         serialize_to_bytes(&self.aad)
     }
 
     fn data(&self) -> Vec<u8> {
-        self.cipher_data.to_owned()
+        self.data.to_owned()
     }
 
     fn tag(&self) -> Vec<u8> {
@@ -643,7 +643,7 @@ impl AeadDataTrait for SeHdrBinV1 {
     }
 }
 
-impl AeadPlainDataTrait for SeHdrDataV1 {
+impl AeadPlainDataTrait for SeHdrDataV2 {
     fn aad(&self) -> Result<Vec<u8>> {
         serialize_to_bytes(&self.aad)
     }
@@ -657,7 +657,7 @@ impl AeadPlainDataTrait for SeHdrDataV1 {
     }
 }
 
-impl AeadCipherTrait for SeHdrDataV1 {
+impl AeadCipherTrait for SeHdrDataV2 {
     fn aead_key_type(&self) -> SymKeyType {
         self.aad.key_type()
     }
@@ -677,17 +677,23 @@ mod tests {
     use std::io::Cursor;
 
     use pv::request::HostKey;
-    use pv::test_utils::get_test_key_and_cert;
+    use pv::test_utils::get_test_key_and_cert_hybrid;
 
     use super::*;
     use crate::pv_utils::{BuilderTrait, SeHdr, SeHdrBuilder, SeHdrVersion};
 
     #[test]
     fn iv_keys_auto_generation_test() {
-        let (_, host_key) = get_test_key_and_cert();
-        let host_keys = [HostKey::V1(host_key.public_key().unwrap())];
+        let (_, host_key1, host_key2) = get_test_key_and_cert_hybrid();
+        let host_keys = [HostKey::V2(
+            HybridPKey::new(
+                host_key1.public_key().unwrap(),
+                host_key2.public_key().unwrap(),
+            )
+            .unwrap(),
+        )];
         let mut builder = SeHdrBuilder::new(
-            SeHdrVersion::V1,
+            SeHdrVersion::V2,
             PSW {
                 addr: 1234,
                 mask: 5678,
@@ -706,8 +712,14 @@ mod tests {
 
     #[test]
     fn chain_test() {
-        let (_, host_key) = get_test_key_and_cert();
-        let host_keys = [HostKey::V1(host_key.public_key().unwrap())];
+        let (_, host_key1, host_key2) = get_test_key_and_cert_hybrid();
+        let host_keys = [HostKey::V2(
+            HybridPKey::new(
+                host_key1.public_key().unwrap(),
+                host_key2.public_key().unwrap(),
+            )
+            .unwrap(),
+        )];
         let xts_key = Confidential::new([0x3; SymKeyType::AES_256_XTS_KEY_LEN]);
         let meta = ComponentMetadataV1 {
             ald: [0x1; SHA_512_HASH_LEN],
@@ -722,7 +734,7 @@ mod tests {
             mask: 5678,
         };
 
-        let mut builder = SeHdrBuilder::new(SeHdrVersion::V1, psw.clone(), meta.clone())
+        let mut builder = SeHdrBuilder::new(SeHdrVersion::V2, psw.clone(), meta.clone())
             .expect("should not fail");
 
         builder
@@ -739,21 +751,27 @@ mod tests {
         let hdr = SeHdr::try_from_io(reader).unwrap();
 
         let hdr_plain = hdr.decrypt(&prot_key).unwrap();
-        assert_eq!(hdr_plain.common.version, SeHdrVersion::V1);
-        let hdr_data_v1: SeHdrDataV1 = hdr_plain.data.try_into().expect("should not fail");
-        assert_eq!(meta.ald, hdr_data_v1.aad.ald);
-        assert_eq!(meta.pld, hdr_data_v1.aad.pld);
-        assert_eq!(meta.tld, hdr_data_v1.aad.tld);
-        assert_eq!(psw, hdr_data_v1.data.value().psw);
-        assert_eq!(cck.value(), hdr_data_v1.data.value().cck.value());
+        assert_eq!(hdr_plain.common.version, SeHdrVersion::V2);
+        let hdr_data_v2: SeHdrDataV2 = hdr_plain.data.try_into().expect("should not fail");
+        assert_eq!(meta.ald, hdr_data_v2.aad.ald);
+        assert_eq!(meta.pld, hdr_data_v2.aad.pld);
+        assert_eq!(meta.tld, hdr_data_v2.aad.tld);
+        assert_eq!(psw, hdr_data_v2.data.value().psw);
+        assert_eq!(cck.value(), hdr_data_v2.data.value().cck.value());
     }
 
     #[test]
     fn max_size_sehdr_test() {
-        const MAX_HOST_KEYS: usize = 95;
+        const MAX_HOST_KEYS: usize = 623; // since Linux kernel 7.0
 
-        let (_, host_key) = get_test_key_and_cert();
-        let pub_key = HostKey::V1(host_key.public_key().unwrap());
+        let (_, host_key1, host_key2) = get_test_key_and_cert_hybrid();
+        let pub_key = HostKey::V2(
+            HybridPKey::new(
+                host_key1.public_key().unwrap(),
+                host_key2.public_key().unwrap(),
+            )
+            .unwrap(),
+        );
         let host_keys_max: Vec<_> = (0..MAX_HOST_KEYS).map(|_| pub_key.clone()).collect();
         let too_many_host_keys: Vec<_> = (0..MAX_HOST_KEYS + 1).map(|_| pub_key.clone()).collect();
         let xts_key = Confidential::new([0x3; SymKeyType::AES_256_XTS_KEY_LEN]);
@@ -769,7 +787,7 @@ mod tests {
             mask: 5678,
         };
 
-        let mut builder = SeHdrBuilder::new(SeHdrVersion::V1, psw.clone(), meta.clone())
+        let mut builder = SeHdrBuilder::new(SeHdrVersion::V2, psw.clone(), meta.clone())
             .expect("should not fail");
         builder
             .add_hostkeys(&host_keys_max)
@@ -777,11 +795,11 @@ mod tests {
             .with_components(meta.clone())
             .expect("should not fail");
         let bin = builder.build().expect("should not fail");
-        assert_eq!(bin.common.version, SeHdrVersion::V1);
-        let hdr_v1: SeHdrBinV1 = bin.data.try_into().expect("should not fail");
-        assert_eq!(hdr_v1.aad.sehs, 8160);
+        assert_eq!(bin.common.version, SeHdrVersion::V2);
+        let hdr_v2: SeHdrBinV2 = bin.data.try_into().expect("should not fail");
+        assert_eq!(hdr_v2.aad.sehs, 1047200); // since kernel 7.0
 
-        let mut builder = SeHdrBuilder::new(SeHdrVersion::V1, psw.clone(), meta.clone())
+        let mut builder = SeHdrBuilder::new(SeHdrVersion::V2, psw.clone(), meta.clone())
             .expect("should not fail");
 
         builder
@@ -793,21 +811,21 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_se_hdr_tag_v1_json() {
-        let tag = SeHdrTagV1 {
+    fn roundtrip_se_hdr_tag_v2_json() {
+        let tag = SeHdrTagV2 {
             tag: [0x42; SymKeyType::AES_256_GCM_TAG_LEN],
         };
 
         let json = serde_json::to_string(&tag).expect("should serialize");
         assert_eq!(json, "{\"tag_hex\":\"42424242424242424242424242424242\"}");
-        let deserialized: SeHdrTagV1 = serde_json::from_str(&json).expect("should deserialize");
+        let deserialized: SeHdrTagV2 = serde_json::from_str(&json).expect("should deserialize");
 
         assert_eq!(tag, deserialized);
     }
 
     #[test]
-    fn roundtrip_se_hdr_conf_v1_json() {
-        let conf = SeHdrConfV1 {
+    fn roundtrip_se_hdr_conf_v2_json() {
+        let conf = SeHdrConfV2 {
             cck: Confidential::new([0x11; 32]),
             xts: Confidential::new([0x22; SymKeyType::AES_256_XTS_KEY_LEN]),
             psw: PSW {
@@ -822,14 +840,14 @@ mod tests {
 
         let json = serde_json::to_string(&conf).expect("should serialize");
         assert_eq!(json, "{\"cck_hex\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"xts_hex\":\"22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222\",\"psw\":{\"mask_hex\":\"0000000000002000\",\"addr_hex\":\"0000000000001000\"},\"scf_hex\":\"0000000000000042\"}");
-        let deserialized: SeHdrConfV1 = serde_json::from_str(&json).expect("should deserialize");
+        let deserialized: SeHdrConfV2 = serde_json::from_str(&json).expect("should deserialize");
 
         assert_eq!(conf, deserialized);
     }
 
     #[test]
-    fn roundtrip_se_hdr_aad_v1_json() {
-        let aad = SeHdrAadV1 {
+    fn roundtrip_se_hdr_aad_v2_json() {
+        let aad = SeHdrAadV2 {
             sehs: 1024,
             iv: [0x33; SymKeyType::AES_256_GCM_IV_LEN],
             res1: 0,
@@ -846,15 +864,15 @@ mod tests {
 
         let json = serde_json::to_string(&aad).expect("should serialize");
         assert_eq!(json, "{\"sehs\":1024,\"iv_hex\":\"333333333333333333333333\",\"nks\":2,\"sea\":512,\"nep\":10,\"pcf_hex\":\"0000000000000100\",\"cust_pub_key\":{\"coord_hex\":\"44444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444\"},\"pld_hex\":\"55555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555\",\"ald_hex\":\"66666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666\",\"tld_hex\":\"77777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777\",\"keyslots\":[]}");
-        let deserialized: SeHdrAadV1 = serde_json::from_str(&json).expect("should deserialize");
+        let deserialized: SeHdrAadV2 = serde_json::from_str(&json).expect("should deserialize");
 
         assert_eq!(aad, deserialized);
     }
 
     #[test]
-    fn roundtrip_se_hdr_bin_v1_json() {
-        let bin = SeHdrBinV1 {
-            aad: SeHdrAadV1 {
+    fn roundtrip_se_hdr_bin_v2_json() {
+        let bin = SeHdrBinV2 {
+            aad: SeHdrAadV2 {
                 sehs: 1024,
                 iv: [0x33; SymKeyType::AES_256_GCM_IV_LEN],
                 res1: 0,
@@ -868,15 +886,15 @@ mod tests {
                 tld: [0x77; SHA_512_HASH_LEN],
                 keyslots: vec![],
             },
-            cipher_data: vec![0x88; 64],
-            tag: SeHdrTagV1 {
+            data: vec![0x88; 64],
+            tag: SeHdrTagV2 {
                 tag: [0x99; SymKeyType::AES_256_GCM_TAG_LEN],
             },
         };
 
         let json = serde_json::to_string(&bin).expect("should serialize");
         assert_eq!(json, "{\"sehs\":1024,\"iv_hex\":\"333333333333333333333333\",\"nks\":0,\"sea\":64,\"nep\":10,\"pcf_hex\":\"0000000000000100\",\"cust_pub_key\":{\"coord_hex\":\"44444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444\"},\"pld_hex\":\"55555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555\",\"ald_hex\":\"66666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666\",\"tld_hex\":\"77777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777\",\"keyslots\":[],\"cipher_data_b64\":\"iIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiA==\",\"tag_hex\":\"99999999999999999999999999999999\"}");
-        let deserialized: SeHdrBinV1 = serde_json::from_str(&json).expect("should deserialize");
+        let deserialized: SeHdrBinV2 = serde_json::from_str(&json).expect("should deserialize");
 
         assert_eq!(bin, deserialized);
     }

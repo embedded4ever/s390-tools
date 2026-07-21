@@ -10,9 +10,8 @@ use std::rc::Rc;
 use anyhow::{anyhow, Context, Result};
 use deku::DekuContainerRead;
 use log::debug;
-use openssl::pkey::{PKey, Public};
 use pv::misc::read_file;
-use pv::request::Confidential;
+use pv::request::{Confidential, HostKey};
 use pvimg::error::Error;
 use pvimg::misc::{round_up, serialize_to_bytes, ShortPsw, PSW, PSW_MASK_BA, PSW_MASK_EA};
 use pvimg::secured_comp::{
@@ -31,7 +30,7 @@ use crate::se_img_comps::{
 };
 
 pub struct SeHdrArgs<'a> {
-    pub keys: &'a [PKey<Public>],
+    pub keys: &'a [HostKey],
     pub pcf: &'a EffectiveControlFlags<SeHdrFlag>,
     pub scf: &'a EffectiveControlFlags<SeHdrFlag>,
     pub cck: &'a Option<(PathBuf, Confidential<Vec<u8>>)>,
@@ -93,7 +92,7 @@ impl<W: Write + Seek> SeImgBuilder<W> {
 
     /// Create a Secure Execution boot image builder
     #[allow(clippy::similar_names)]
-    pub(crate) fn new_v1(
+    pub(crate) fn new(
         mut writer: W,
         encryption: bool,
         legacy_expected_se_hdr_size: Option<usize>,
@@ -320,8 +319,16 @@ impl<W: Write + Seek> SeImgBuilder<W> {
     fn add_sehdr(&mut self, stage3b_entry: u64, sehdr_args: SeHdrArgs) -> Result<Rc<ImgComponent>> {
         let meta = self.builder.finish()?;
 
+        // Determine version from first key (all keys should be same version)
+        let version = match sehdr_args.keys.first() {
+            Some(HostKey::V1(_)) => SeHdrVersion::V1,
+            Some(HostKey::V2(_)) => SeHdrVersion::V2,
+            Some(_) => unreachable!("Unknown HostKey version"),
+            None => return Err(Error::NoHostkey.into()),
+        };
+
         let mut se_hdr_builder = SeHdrBuilder::new(
-            SeHdrVersion::V1,
+            version,
             PSW {
                 addr: sehdr_args.psw_addr.unwrap_or(stage3b_entry),
                 mask: Self::DEFAULT_INITIAL_PSW_MASK,
@@ -495,7 +502,7 @@ mod tests {
 
         let encryption = true;
         let mut writer = Cursor::new(Vec::new());
-        let ctx_res = SeImgBuilder::new_v1(&mut writer, encryption, None, None);
+        let ctx_res = SeImgBuilder::new(&mut writer, encryption, None, None);
         assert!(ctx_res.is_ok());
         let ctx = ctx_res.unwrap();
 

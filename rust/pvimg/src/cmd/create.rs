@@ -8,15 +8,18 @@ use std::io::BufReader;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info, warn};
 use pv::misc::{open_file, try_parse_u64};
+use pv::request::HostKey;
 use pvimg::error::OwnExitCode;
 use pvimg::secured_comp::ComponentTrait;
 use pvimg::uvdata::{
     EffectiveControlFlags, FlagState, FlagsOverride, SeHdrControlFlags, SeHdrControlFlagsModel,
-    SeHdrDataV1, SeHdrFlag, SeHdrVersion, SeTarget,
+    SeHdrDataV1, SeHdrDataV2, SeHdrFlag, SeHdrVersion, SeTarget,
 };
 use utils::{AtomicFile, AtomicFileOperation};
 
-use crate::cli::{ComponentPaths, CreateBootImageArgs, SeHdrFlagName};
+use crate::cli::{
+    ComponentPaths, CreateBootImageArgs, HdrVersion, HdrVersionSelection, SeHdrFlagName,
+};
 use crate::cmd::common::read_user_provided_keys;
 use crate::se_img::{SeHdrArgs, SeImgBuilder};
 use crate::se_img_comps::cmdline::Cmdline;
@@ -274,15 +277,54 @@ fn parse_flags(
     Ok((pcf, scf))
 }
 
+/// Auto-detect the SE header version based on the host keys.
+///
+/// Returns V2 if any host key is a hybrid key, otherwise returns V1.
+fn auto_detect_version(host_keys: &[HostKey]) -> SeHdrVersion {
+    let use_hybrid_keys = host_keys.iter().any(|k: &HostKey| k.is_hybrid());
+    if use_hybrid_keys {
+        SeHdrVersion::V2
+    } else {
+        SeHdrVersion::V1
+    }
+}
+
+impl From<HdrVersion> for SeHdrVersion {
+    fn from(value: HdrVersion) -> Self {
+        match value {
+            HdrVersion::V1 => Self::V1,
+            HdrVersion::V2 => Self::V2,
+        }
+    }
+}
+
+/// Determine the SE header version to use.
+///
+/// If an explicit version is provided via CLI, use that.
+/// Otherwise, auto-detect based on the host key types.
+fn determine_version(cli_version: HdrVersionSelection, host_keys: &[HostKey]) -> SeHdrVersion {
+    match cli_version {
+        HdrVersionSelection::Auto => auto_detect_version(host_keys),
+        HdrVersionSelection::Explicit(hdr_version) => hdr_version.into(),
+    }
+}
+
 /// Create a Secure Execution boot image
 pub fn create(opt: &CreateBootImageArgs) -> Result<OwnExitCode> {
     // Verify host key documents first, because if they are not valid there is
     // no reason to continue.
-    let verified_host_keys = opt
-        .certificate_args
-        .get_verified_hkds("Secure Execution image")?;
+    let verified_host_keys = opt.certificate_args.get_verified_hkds_new(
+        "Secure Execution image",
+        HdrVersionSelection::Explicit(opt.hdr_version).map(|v| v.into()),
+    )?;
+
+    let version = determine_version(
+        HdrVersionSelection::Explicit(opt.hdr_version),
+        &verified_host_keys,
+    );
+
     let user_provided_keys = read_user_provided_keys(&opt.keys)?;
-    let (plaintext_flags, secret_flags) = parse_flags(opt, SeHdrVersion::V1)?;
+    let (plaintext_flags, secret_flags) = parse_flags(opt, version)?;
 
     if plaintext_flags.has(SeHdrFlag::NoComponentEncryption) {
         warn!("The components encryption is disabled, make sure that the components do not contain any confidential content.");
@@ -297,9 +339,13 @@ pub fn create(opt: &CreateBootImageArgs) -> Result<OwnExitCode> {
 
     // FIXME get rid of the legacy mode. But that's only possible as soon as all
     // available tools are updated.
-    let expected_se_hdr_size = SeHdrDataV1::expected_size(verified_host_keys.len())?;
+    let expected_se_hdr_size = match version {
+        SeHdrVersion::V1 => SeHdrDataV1::expected_size(verified_host_keys.len())?,
+        SeHdrVersion::V2 => SeHdrDataV2::expected_size(verified_host_keys.len())?,
+        _ => return Err(anyhow!("Unsupported SE header version: {:?}", version)),
+    };
     let mut writer = AtomicFile::with_extension(&opt.output, "part", &mut OpenOptions::new())?;
-    let mut seimg_ctx = SeImgBuilder::new_v1(
+    let mut seimg_ctx = SeImgBuilder::new(
         &mut writer,
         !plaintext_flags.has(SeHdrFlag::NoComponentEncryption),
         Some(expected_se_hdr_size),
@@ -400,6 +446,37 @@ mod test {
             .with_overrides(&scf_overrides)
             .expect("Failed to create expected SCF");
         assert_eq!(parsed_flags.1, expected_scf);
+    }
+
+    #[test]
+    fn test_auto_detect_version_v1() {
+        // Mock non-hybrid keys - should return V1
+        // Note: This is a simplified test. In real usage, you'd need actual HostKey instances
+        let keys: Vec<HostKey> = vec![];
+        let version = auto_detect_version(&keys);
+        assert_eq!(version, SeHdrVersion::V1);
+    }
+
+    #[test]
+    fn test_determine_version_explicit_v1() {
+        let keys: Vec<HostKey> = vec![];
+        let version = determine_version(HdrVersionSelection::Explicit(HdrVersion::V1), &keys);
+        assert_eq!(version, SeHdrVersion::V1);
+    }
+
+    #[test]
+    fn test_determine_version_explicit_v2() {
+        let keys: Vec<HostKey> = vec![];
+        let version = determine_version(HdrVersionSelection::Explicit(HdrVersion::V2), &keys);
+        assert_eq!(version, SeHdrVersion::V2);
+    }
+
+    #[test]
+    fn test_determine_version_auto_detect() {
+        let keys: Vec<HostKey> = vec![];
+        let version = determine_version(HdrVersionSelection::Auto, &keys);
+        // With empty keys, should default to V1
+        assert_eq!(version, SeHdrVersion::V1);
     }
 
     #[test]

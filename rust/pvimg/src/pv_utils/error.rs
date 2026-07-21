@@ -126,6 +126,12 @@ pub enum Error {
         max_output_size: usize,
     },
 
+    #[error("Operation {operation} not supported")]
+    UnsupportedOperation { operation: String },
+
+    #[error("Unsupported SE header version: {0:?}")]
+    UnsupportedSeHdrVersion(pv::request::SeHdrVersion),
+
     // Errors from other crates
     #[error(transparent)]
     Deku(#[from] deku::DekuError),

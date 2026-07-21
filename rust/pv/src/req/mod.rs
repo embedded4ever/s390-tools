@@ -22,6 +22,5 @@ pub use ec_coord::EcPubKeyCoord;
 pub use encrypt::{Aad, Encrypt};
 pub use header::RequestHdr;
 pub use hostkey::{HostKey, HybridPKey};
-#[expect(unused)]
 pub use keyslot::{Keyslot, KeyslotV1, KeyslotV2};
 pub use request::{BinReqValues, Request};

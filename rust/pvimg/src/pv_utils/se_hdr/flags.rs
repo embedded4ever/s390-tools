@@ -39,6 +39,9 @@
 //!
 //! // Get plaintext control flags configuration for V1-max
 //! let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+//!
+//! // Get secret control flags configuration for V2-max
+//! let scf_v2 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V2Max);
 //! ```
 //!
 //! ## 2. Checking Flag Support and Defaults
@@ -72,6 +75,35 @@
 //! let result = pcf_v1.with_overrides(&overrides);
 //! assert!(result.is_ok());
 //! ```
+//!
+//! ## 4. Working with Flag Collections
+//!
+//! ```rust
+//! use pvimg::uvdata::{SeHdrControlFlagsModel, SeTarget};
+//!
+//! let pcf_v2 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V2Max);
+//!
+//! // Get all supported flags
+//! let supported = pcf_v2.supported_flags();
+//! println!("V2-max supports {} plaintext flags", supported.len());
+//!
+//! // Get default flags
+//! let defaults = pcf_v2.default_flags();
+//! println!("V2-max has {} default plaintext flags", defaults.len());
+//! ```
+//!
+//! # Version Differences
+//!
+//! ## Plaintext Control Flags
+//!
+//! **V1 Defaults:** `PckmoDeaTdea`, `PckmoAes`, `PckmoEcc`
+//!
+//! **V2 Defaults:** `PckmoDeaTdea`, `PckmoAes`, `PckmoEcc`, `PckmoHmac`
+//!
+//! ## Secret Control Flags
+//!
+//! **V1 & V2:** Both versions support `CckExtensionSecretEnforcement` and `CckUpdate`
+//! (no defaults, must be explicitly enabled via overrides)
 //!
 //! # Error Handling
 //!
@@ -169,6 +201,10 @@ impl SeHdrControlFlagsModel {
             SeTarget::V1Max => (
                 common_defaults.into_iter().collect(),
                 common_supported.into_iter().collect(),
+            ),
+            SeTarget::V2Max => (
+                common_defaults.into_iter().chain([PckmoHmac]).collect(),
+                common_supported.into_iter().chain([]).collect(),
             ),
         };
 
@@ -327,6 +363,25 @@ mod test {
     }
 
     #[test]
+    fn test_pcfs_v2() {
+        let pcfs_v2 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V2Max);
+
+        // V1 flags (should all be supported in V2)
+        assert!(pcfs_v2.supports(SeHdrFlag::ConfidentialDump));
+        assert!(pcfs_v2.supports(SeHdrFlag::NoComponentEncryption));
+        assert!(pcfs_v2.supports(SeHdrFlag::PckmoDeaTdea));
+        assert!(pcfs_v2.supports(SeHdrFlag::PckmoAes));
+        assert!(pcfs_v2.supports(SeHdrFlag::PckmoEcc));
+        assert!(pcfs_v2.supports(SeHdrFlag::PckmoHmac));
+        assert!(pcfs_v2.supports(SeHdrFlag::BackupTargetKeys));
+
+        // Check defaults (same as V1)
+        assert!(pcfs_v2.is_default(SeHdrFlag::PckmoDeaTdea));
+        assert!(pcfs_v2.is_default(SeHdrFlag::PckmoAes));
+        assert!(pcfs_v2.is_default(SeHdrFlag::PckmoEcc));
+    }
+
+    #[test]
     fn test_scfs_v1() {
         let scfs_v1 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V1Max);
 
@@ -336,6 +391,14 @@ mod test {
         // No defaults for secret flags
         assert!(!scfs_v1.is_default(SeHdrFlag::CckExtensionSecretEnforcement));
         assert!(!scfs_v1.is_default(SeHdrFlag::CckUpdate));
+    }
+
+    #[test]
+    fn test_scfs_v2() {
+        let scfs_v2 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V2Max);
+
+        assert!(scfs_v2.supports(SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(scfs_v2.supports(SeHdrFlag::CckUpdate));
     }
 
     #[test]
@@ -480,6 +543,45 @@ mod test {
     }
 
     #[test]
+    fn test_pcfs_v2_with_overrides_mixed() {
+        // Create base model for V2 plaintext control flags
+        let pcf_v2 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V2Max);
+
+        // Verify V2 defaults: PckmoDeaTdea, PckmoAes, PckmoEcc, PckmoHmac
+        assert_eq!(pcf_v2.default_flags().len(), 4);
+        assert!(pcf_v2.is_default(SeHdrFlag::PckmoDeaTdea));
+        assert!(pcf_v2.is_default(SeHdrFlag::PckmoAes));
+        assert!(pcf_v2.is_default(SeHdrFlag::PckmoEcc));
+        assert!(pcf_v2.is_default(SeHdrFlag::PckmoHmac));
+
+        // Create mixed overrides: disable one default, enable one non-default
+        let mut overrides = FlagsOverride::new();
+        overrides.disable(SeHdrFlag::PckmoHmac); // Disable a default
+        overrides.enable(SeHdrFlag::NoComponentEncryption); // Enable a non-default
+
+        // Verify overrides
+        assert_eq!(overrides.len(), 2);
+        assert_eq!(
+            overrides.get(SeHdrFlag::PckmoHmac),
+            Some(FlagState::Disabled)
+        );
+        assert_eq!(
+            overrides.get(SeHdrFlag::NoComponentEncryption),
+            Some(FlagState::Enabled)
+        );
+
+        // Apply overrides
+        let configured_pcf = pcf_v2
+            .with_overrides(&overrides)
+            .expect("Valid overrides should succeed");
+
+        // Verify the configured model maintains version and support
+        assert_eq!(configured_pcf.version(), SeHdrVersion::V2);
+        assert!(!configured_pcf.has(SeHdrFlag::PckmoHmac));
+        assert!(configured_pcf.has(SeHdrFlag::NoComponentEncryption));
+    }
+
+    #[test]
     fn test_asref_flexibility() {
         // Test that both owned values and references work with AsRef-based API
         let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
@@ -584,6 +686,34 @@ mod test {
     }
 
     #[test]
+    fn test_plaintext_control_flags_construction_v2() {
+        // Test construction of PlaintextControlFlags for V2
+        let pcf_v2 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V2Max);
+
+        // Verify version
+        assert_eq!(pcf_v2.version(), SeHdrVersion::V2);
+
+        // Verify default flags for V2
+        let default_flags = pcf_v2.default_flags();
+        assert_eq!(default_flags.len(), 4);
+        assert!(default_flags.contains(&SeHdrFlag::PckmoDeaTdea));
+        assert!(default_flags.contains(&SeHdrFlag::PckmoAes));
+        assert!(default_flags.contains(&SeHdrFlag::PckmoEcc));
+        assert!(default_flags.contains(&SeHdrFlag::PckmoHmac));
+
+        // Verify supported flags for V2
+        let supported_flags = pcf_v2.supported_flags();
+        assert_eq!(supported_flags.len(), 7);
+        assert!(supported_flags.contains(&SeHdrFlag::ConfidentialDump));
+        assert!(supported_flags.contains(&SeHdrFlag::NoComponentEncryption));
+        assert!(supported_flags.contains(&SeHdrFlag::PckmoDeaTdea));
+        assert!(supported_flags.contains(&SeHdrFlag::PckmoAes));
+        assert!(supported_flags.contains(&SeHdrFlag::PckmoEcc));
+        assert!(supported_flags.contains(&SeHdrFlag::PckmoHmac));
+        assert!(supported_flags.contains(&SeHdrFlag::BackupTargetKeys));
+    }
+
+    #[test]
     fn test_secret_control_flags_construction_v1() {
         // Test construction of SecretControlFlags for V1
         let scf_v1 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V1Max);
@@ -603,6 +733,61 @@ mod test {
         assert!(supported_flags.contains(&SeHdrFlag::CckUpdate));
     }
 
+    #[test]
+    fn test_secret_control_flags_construction_v2() {
+        // Test construction of SecretControlFlags for V2
+        let scf_v2 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V2Max);
+
+        // Verify version
+        assert_eq!(scf_v2.version(), SeHdrVersion::V2);
+
+        // Verify default flags for V2 (should be empty)
+        let default_flags = scf_v2.default_flags();
+        assert_eq!(default_flags.len(), 0);
+        assert!(default_flags.is_empty());
+
+        // Verify supported flags for V2 (same as V1)
+        let supported_flags = scf_v2.supported_flags();
+        assert_eq!(supported_flags.len(), 2);
+        assert!(supported_flags.contains(&SeHdrFlag::CckExtensionSecretEnforcement));
+        assert!(supported_flags.contains(&SeHdrFlag::CckUpdate));
+    }
+
+    #[test]
+    fn test_plaintext_flags_v1_vs_v2_differences() {
+        let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+        let pcf_v2 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V2Max);
+
+        // V1 should have 3 default flags, V2 should have 4
+        assert_eq!(pcf_v1.default_flags().len(), 3);
+        assert_eq!(pcf_v2.default_flags().len(), 4);
+
+        // V2 adds PckmoHmac to defaults
+        assert!(!pcf_v1.is_default(SeHdrFlag::PckmoHmac));
+        assert!(pcf_v2.is_default(SeHdrFlag::PckmoHmac));
+
+        // V1 should have 7 supported flags, V2 should have 7 [TODO: Marc claims 8?]
+        assert_eq!(pcf_v1.supported_flags().len(), 7);
+        assert_eq!(pcf_v2.supported_flags().len(), 7);
+    }
+
+    #[test]
+    fn test_secret_flags_v1_vs_v2_consistency() {
+        let scf_v1 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V1Max);
+        let scf_v2 = SeHdrControlFlagsModel::scf_for_target(SeTarget::V2Max);
+
+        // Both versions should have the same defaults (empty)
+        assert_eq!(scf_v1.default_flags().len(), scf_v2.default_flags().len());
+        assert!(scf_v1.default_flags().is_empty());
+        assert!(scf_v2.default_flags().is_empty());
+
+        // Both versions should have the same supported flags
+        assert_eq!(
+            scf_v1.supported_flags().len(),
+            scf_v2.supported_flags().len()
+        );
+        assert_eq!(scf_v1.supported_flags(), scf_v2.supported_flags());
+    }
     // Tests for Into<Msb0Flags64> trait implementations
 
     #[test]
@@ -621,6 +806,25 @@ mod test {
         // Verify non-default flags are not set
         assert!(!flags.is_set(SeHdrFlag::PckmoHmac.bit_position()));
         assert!(!flags.is_set(SeHdrFlag::ConfidentialDump.bit_position()));
+    }
+
+    #[test]
+    fn test_into_msb0_flags_borrowed() {
+        // Test Into<Msb0Flags64> for borrowed ControlFlagsModel
+        let pcf_v2 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V2Max);
+
+        // Convert using reference (model remains usable)
+        let flags: Msb0Flags64 = (&pcf_v2).into();
+
+        // V2 defaults: PckmoDeaTdea, PckmoAes, PckmoEcc, PckmoHmac
+        assert!(flags.is_set(SeHdrFlag::PckmoDeaTdea.bit_position()));
+        assert!(flags.is_set(SeHdrFlag::PckmoAes.bit_position()));
+        assert!(flags.is_set(SeHdrFlag::PckmoEcc.bit_position()));
+        assert!(flags.is_set(SeHdrFlag::PckmoHmac.bit_position()));
+
+        // Model should still be usable
+        assert_eq!(pcf_v2.version(), SeHdrVersion::V2);
+        assert_eq!(pcf_v2.default_flags().len(), 4);
     }
 
     #[test]
@@ -740,5 +944,17 @@ mod test {
         assert_eq!(flags.version(), SeHdrVersion::V1);
         assert_eq!(flags.known_flags().len(), 0);
         assert_eq!(flags.unknown_flags().bits(), 0);
+    }
+
+    #[test]
+    fn test_effective_control_flags_from_u64_v2_specific() {
+        // Test V2-specific flags
+        let mut value = 0u64;
+        value |= 1u64 << (63 - SeHdrFlag::PckmoHmac.bit_position());
+
+        let flags = SeHdrControlFlags::from_u64(value, SeTarget::V2Max, true);
+
+        assert_eq!(flags.version(), SeHdrVersion::V2);
+        assert!(flags.has(SeHdrFlag::PckmoHmac));
     }
 }

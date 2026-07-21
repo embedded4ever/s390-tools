@@ -7,11 +7,12 @@ mod builder;
 mod flags;
 mod generic_flags;
 mod hdr_v1;
+mod hdr_v2;
 mod keys;
 
 pub use brb::{
-    ComponentMetadata, ComponentMetadataV1, EnvelopeSeHdrV1, SeH, SeHdr, SeHdrBinV1, SeHdrData,
-    SeHdrDataV1, SeHdrPlain, SeHdrVersion, SeHdrVersioned,
+    ComponentMetadata, ComponentMetadataV1, EnvelopeSeHdrV1, SeH, SeHdr, SeHdrBinV1, SeHdrBinV2,
+    SeHdrData, SeHdrDataV1, SeHdrDataV2, SeHdrPlain, SeHdrVersion, SeHdrVersioned,
 };
 pub use builder::SeHdrBuilder;
 pub use flags::{

@@ -8,13 +8,14 @@ use std::mem::size_of;
 use deku::ctx::Endian;
 use deku::prelude::*;
 use enum_dispatch::enum_dispatch;
-use pv::request::openssl::pkey::{PKey, PKeyRef, Private, Public};
+use pv::request::openssl::pkey::{PKey, Private, Public};
 use pv::request::{seek_se_hdr_start, Aes256XtsKey, Confidential, SymKey, SymKeyType};
 use pv::static_assert;
 use serde::{Deserialize, Serialize};
 use utils::S390ToolsMetaData;
 
 pub use super::hdr_v1::{SeHdrBinV1, SeHdrDataV1};
+pub use super::hdr_v2::{SeHdrBinV2, SeHdrDataV2};
 use super::{EffectiveControlFlags, SeHdrFlag};
 use crate::misc::PAGESIZE;
 use crate::pv_utils::error::{Error, Result};
@@ -60,6 +61,8 @@ impl EnvelopeSeHdrV1 {
 pub enum SeHdrVersion {
     /// Secure Execution header v1
     V1 = 0x100,
+    /// Secure Execution header v2
+    V2 = 0x200,
 }
 
 impl Display for SeHdrVersion {
@@ -69,6 +72,7 @@ impl Display for SeHdrVersion {
             "{}",
             match self {
                 SeHdrVersion::V1 => "1",
+                SeHdrVersion::V2 => "2",
             }
         )
     }
@@ -204,13 +208,53 @@ impl Display for SeHdrPlain {
     }
 }
 
-#[enum_dispatch(AeadCipherTrait, AeadDataTrait, KeyExchangeTrait)]
+#[non_exhaustive]
+#[enum_dispatch(AeadCipherTrait, AeadDataTrait)]
 #[derive(Clone, PartialEq, Eq, Debug, DekuRead, DekuWrite, Serialize, Deserialize)]
 #[serde(untagged)]
 #[deku(ctx = "_endian: Endian, version: SeHdrVersion", id = "version")]
 pub enum SeHdrVersioned {
     #[deku(id = "SeHdrVersion::V1")]
     SeHdrBinV1(SeHdrBinV1),
+    #[deku(id = "SeHdrVersion::V2")]
+    SeHdrBinV2(SeHdrBinV2),
+}
+
+impl KeyExchangeTrait for SeHdrVersioned {
+    type PrivateKeyType = PKey<Private>;
+    type TargetKeyType = pv::request::HostKey;
+
+    fn contains<K>(&self, key: K) -> Result<bool>
+    where
+        K: AsRef<Self::TargetKeyType>,
+    {
+        match (self, key.as_ref()) {
+            (SeHdrVersioned::SeHdrBinV1(data), pv::request::HostKey::V1(key)) => data.contains(key),
+            (SeHdrVersioned::SeHdrBinV2(data), pv::request::HostKey::V2(key)) => data.contains(key),
+            (_, _) => Err(Error::InvalidSeHdr),
+        }
+    }
+
+    fn contains_hash<H: AsRef<[u8]>>(&self, hash: H) -> bool {
+        match self {
+            SeHdrVersioned::SeHdrBinV1(data) => data.contains_hash(hash),
+            SeHdrVersioned::SeHdrBinV2(data) => data.contains_hash(hash),
+        }
+    }
+
+    fn cust_pub_key(&mut self) -> Result<PKey<Public>> {
+        match self {
+            SeHdrVersioned::SeHdrBinV1(data) => data.cust_pub_key(),
+            SeHdrVersioned::SeHdrBinV2(data) => data.cust_pub_key(),
+        }
+    }
+
+    fn key_type(&self) -> SymKeyType {
+        match self {
+            SeHdrVersioned::SeHdrBinV1(data) => data.key_type(),
+            SeHdrVersioned::SeHdrBinV2(data) => data.key_type(),
+        }
+    }
 }
 
 impl Display for SeHdrVersioned {
@@ -223,10 +267,18 @@ impl Display for SeHdrVersioned {
                     write!(f, "{se_hdr_bin_v1}")
                 }
             }
+            SeHdrVersioned::SeHdrBinV2(se_hdr_bin_v2) => {
+                if f.alternate() {
+                    write!(f, "{se_hdr_bin_v2:#}")
+                } else {
+                    write!(f, "{se_hdr_bin_v2}")
+                }
+            }
         }
     }
 }
 
+#[non_exhaustive]
 #[enum_dispatch(
     AeadCipherTrait,
     AeadPlainDataTrait,
@@ -239,6 +291,8 @@ impl Display for SeHdrVersioned {
 pub enum SeHdrData {
     #[deku(id = "SeHdrVersion::V1")]
     SeHdrDataV1(SeHdrDataV1),
+    #[deku(id = "SeHdrVersion::V2")]
+    SeHdrDataV2(SeHdrDataV2),
 }
 
 impl Display for SeHdrData {
@@ -251,6 +305,13 @@ impl Display for SeHdrData {
                     write!(f, "{data_v1}")
                 }
             }
+            SeHdrData::SeHdrDataV2(data_v2) => {
+                if f.alternate() {
+                    write!(f, "{data_v2:#}")
+                } else {
+                    write!(f, "{data_v2}")
+                }
+            }
         }
     }
 }
@@ -259,6 +320,7 @@ impl AeadCipherBuilderTrait for SeHdrData {
     fn set_iv(&mut self, iv: &[u8]) -> Result<()> {
         match self {
             Self::SeHdrDataV1(data) => data.set_iv(iv),
+            Self::SeHdrDataV2(data) => data.set_iv(iv),
         }
     }
 }
@@ -316,12 +378,11 @@ impl AeadDataTrait for SeHdr {
 }
 
 impl KeyExchangeTrait for SeHdr {
+    type PrivateKeyType = PKey<Private>;
+    type TargetKeyType = pv::request::HostKey;
+
     fn contains_hash<H: AsRef<[u8]>>(&self, hash: H) -> bool {
         self.data.contains_hash(hash)
-    }
-
-    fn contains<K: AsRef<PKeyRef<Public>>>(&self, key: K) -> Result<bool> {
-        self.data.contains(key)
     }
 
     fn cust_pub_key(&mut self) -> Result<PKey<Public>> {
@@ -330,6 +391,13 @@ impl KeyExchangeTrait for SeHdr {
 
     fn key_type(&self) -> SymKeyType {
         self.aead_key_type()
+    }
+
+    fn contains<K>(&self, key: K) -> Result<bool>
+    where
+        K: AsRef<Self::TargetKeyType>,
+    {
+        self.data.contains(key)
     }
 }
 
@@ -407,25 +475,46 @@ impl AeadCipherBuilderTrait for SeHdrPlain {
 }
 
 impl KeyExchangeBuilderTrait for SeHdrPlain {
+    type AeadKeyType = SymKey;
+    type PrivateKeyType = PKey<Private>;
+    type TargetKeyType = pv::request::HostKey;
+
     fn add_keyslot(
         &mut self,
-        hostkey: &PKeyRef<Public>,
-        aead_key: &SymKey,
-        priv_key: &PKeyRef<Private>,
+        hostkey: &Self::TargetKeyType,
+        aead_key: &Self::AeadKeyType,
+        priv_key: &Self::PrivateKeyType,
     ) -> Result<()> {
-        self.data.add_keyslot(hostkey, aead_key, priv_key)
+        match (&mut self.data, hostkey) {
+            (SeHdrData::SeHdrDataV1(data), pv::request::HostKey::V1(key)) => {
+                data.add_keyslot(key, aead_key, priv_key)
+            }
+            (SeHdrData::SeHdrDataV2(data), pv::request::HostKey::V2(key)) => {
+                data.add_keyslot(key, aead_key, priv_key)
+            }
+            (_, _) => Err(Error::InvalidSeHdr),
+        }
     }
 
     fn clear_keyslots(&mut self) -> Result<()> {
-        self.data.clear_keyslots()
+        match &mut self.data {
+            SeHdrData::SeHdrDataV1(data) => data.clear_keyslots(),
+            SeHdrData::SeHdrDataV2(data) => data.clear_keyslots(),
+        }
     }
 
     fn generate_private_key(&self) -> Result<PKey<Private>> {
-        self.data.generate_private_key()
+        match &self.data {
+            SeHdrData::SeHdrDataV1(data) => data.generate_private_key(),
+            SeHdrData::SeHdrDataV2(data) => data.generate_private_key(),
+        }
     }
 
-    fn set_cust_public_key(&mut self, key: &PKeyRef<Private>) -> Result<()> {
-        self.data.set_cust_public_key(key)
+    fn set_cust_public_key(&mut self, key: &Self::PrivateKeyType) -> Result<()> {
+        match &mut self.data {
+            SeHdrData::SeHdrDataV1(data) => data.set_cust_public_key(key),
+            SeHdrData::SeHdrDataV2(data) => data.set_cust_public_key(key),
+        }
     }
 }
 
@@ -451,20 +540,39 @@ pub enum ComponentMetadata {
 }
 
 impl KeyExchangeTrait for SeHdrPlain {
-    fn contains<K: AsRef<PKeyRef<Public>>>(&self, key: K) -> Result<bool> {
-        self.data.contains(key)
-    }
+    type PrivateKeyType = PKey<Private>;
+    type TargetKeyType = pv::request::HostKey;
 
     fn cust_pub_key(&mut self) -> Result<PKey<Public>> {
-        self.data.cust_pub_key()
+        match &mut self.data {
+            SeHdrData::SeHdrDataV1(data) => data.cust_pub_key(),
+            SeHdrData::SeHdrDataV2(data) => data.cust_pub_key(),
+        }
     }
 
     fn key_type(&self) -> SymKeyType {
-        self.data.key_type()
+        match &self.data {
+            SeHdrData::SeHdrDataV1(data) => data.key_type(),
+            SeHdrData::SeHdrDataV2(data) => data.key_type(),
+        }
     }
 
     fn contains_hash<H: AsRef<[u8]>>(&self, hash: H) -> bool {
-        self.data.contains_hash(hash)
+        match &self.data {
+            SeHdrData::SeHdrDataV1(data) => data.contains_hash(hash),
+            SeHdrData::SeHdrDataV2(data) => data.contains_hash(hash),
+        }
+    }
+
+    fn contains<K>(&self, key: K) -> Result<bool>
+    where
+        K: AsRef<Self::TargetKeyType>,
+    {
+        match (&self.data, key.as_ref()) {
+            (SeHdrData::SeHdrDataV1(data), pv::request::HostKey::V1(key)) => data.aad.contains(key),
+            (SeHdrData::SeHdrDataV2(data), pv::request::HostKey::V2(key)) => data.aad.contains(key),
+            (_, _) => Err(Error::InvalidSeHdr),
+        }
     }
 }
 

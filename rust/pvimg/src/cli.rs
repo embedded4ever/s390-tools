@@ -13,7 +13,10 @@ use std::string::ToString;
 use clap::builder::{PossibleValue, TypedValueParser};
 use clap::{Arg, ArgGroup, Args, Command, CommandFactory, Parser, ValueEnum, ValueHint};
 use log::warn;
-use utils::{CertificateOptions, DeprecatedVerbosityOptions, ValueEnumDisplay};
+use utils::{
+    AutoOrExplicit, CertificateOptions, DeprecatedVerbosityOptions, HkdVersion, ValueEnumDisplay,
+    ValueEnumFromStr,
+};
 
 /// SE header control flags for CLI
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ValueEnum, ValueEnumDisplay)]
@@ -37,6 +40,28 @@ pub enum SeHdrFlagName {
     CckUpdate,
     /// Image components without encryption
     NoComponentEncryption,
+}
+
+/// Secure Execution header version for CLI
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, ValueEnumDisplay, ValueEnumFromStr)]
+pub enum HdrVersion {
+    #[value(name = "1")]
+    /// Version 1 - uses traditional cryptographic keys
+    V1,
+    #[value(name = "2")]
+    /// Version 2 - uses hybrid (post-quantum) cryptographic keys
+    V2,
+}
+
+pub type HdrVersionSelection = AutoOrExplicit<HdrVersion>;
+
+impl From<HdrVersion> for HkdVersion {
+    fn from(val: HdrVersion) -> Self {
+        match val {
+            HdrVersion::V1 => Self::Classical,
+            HdrVersion::V2 => Self::Hybrid,
+        }
+    }
 }
 
 /// Create and inspect IBM Secure Execution images.
@@ -318,11 +343,13 @@ pub struct CreateBootImageLegacyFlags {
     #[arg(long, action = clap::ArgAction::SetTrue, conflicts_with="enable_pckmo", group="header-flags")]
     pub disable_pckmo: Option<bool>,
 
-    /// Enable the support for the HMAC PCKMO key encryption function.
+    /// Enable the support for the HMAC PCKMO key encryption function (default for header version
+    /// 2).
     #[arg(long, action = clap::ArgAction::SetTrue, group="header-flags")]
     pub enable_pckmo_hmac: Option<bool>,
 
-    /// Disable the support for the HMAC PCKMO key encryption function (default).
+    /// Disable the support for the HMAC PCKMO key encryption function (default for header version
+    /// 1).
     #[arg(long, action = clap::ArgAction::SetTrue, conflicts_with="enable_pckmo_hmac", group="header-flags")]
     pub disable_pckmo_hmac: Option<bool>,
 
@@ -653,7 +680,6 @@ impl GenprotimgCliOptions {
 }
 
 #[derive(Parser, Debug)]
-#[cfg_attr(test, derive(Default))]
 pub struct CreateBootImageArgs {
     #[clap(flatten)]
     pub component_paths: ComponentPaths,
@@ -675,6 +701,10 @@ pub struct CreateBootImageArgs {
     /// Overwrite an existing Secure Execution boot image.
     #[arg(long)]
     pub overwrite: bool,
+
+    /// Specify the Secure Execution header version to use.
+    #[arg(long = "hdr-version", value_name = "VERSION", default_value_t = HdrVersion::V1)]
+    pub hdr_version: HdrVersion,
 
     #[clap(flatten)]
     pub keys: UserKeys,
@@ -707,6 +737,25 @@ pub struct CreateBootImageArgs {
 
     #[clap(flatten)]
     pub experimental_args: CreateBootImageExperimentalArgs,
+}
+
+#[cfg(test)]
+impl Default for CreateBootImageArgs {
+    fn default() -> Self {
+        Self {
+            component_paths: ComponentPaths::default(),
+            output: PathBuf::new(),
+            certificate_args: CertificateOptions::default(),
+            no_component_check: false,
+            overwrite: false,
+            hdr_version: HdrVersion::V1,
+            keys: UserKeys::default(),
+            legacy_flags: CreateBootImageLegacyFlags::default(),
+            flags: Vec::new(),
+            disable_flags: Vec::new(),
+            experimental_args: CreateBootImageExperimentalArgs::default(),
+        }
+    }
 }
 
 /// Experimental options
@@ -985,6 +1034,9 @@ mod test {
 
             // Test with NoComponentEncryption flag
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("flags", ["--flags", &SeHdrFlagName::NoComponentEncryption.to_string()])])),
+
+            // Test with HdrVersion V2
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("hdr-version", ["--hdr-version", "2"])])),
         ];
         // Invalid test cases grouped by expected error kind
         let invalid_missing_required = [
@@ -1478,6 +1530,12 @@ mod test {
             &parse_pvimg as &dyn Fn(&[&str]) -> Result<CliOptions, clap::Error>,
             "pvimg info",
         );
+    }
+
+    #[test]
+    fn test_hdr_version_conversions() {
+        assert_eq!(HkdVersion::from(HdrVersion::V1), HkdVersion::Classical);
+        assert_eq!(HkdVersion::from(HdrVersion::V2), HkdVersion::Hybrid);
     }
 
     #[test]

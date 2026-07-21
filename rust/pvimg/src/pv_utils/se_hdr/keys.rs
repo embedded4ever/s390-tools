@@ -10,7 +10,7 @@ use deku::ctx::Endian;
 use deku::{DekuRead, DekuWrite};
 use openssl::hash::{hash, MessageDigest};
 use openssl::pkey::{PKey, PKeyRef, Public};
-use pv::request::EcPubKeyCoord;
+use pv::request::{EcPubKeyCoord, HybridPKey};
 use pv::static_assert;
 use serde::{Deserialize, Serialize};
 use utils::HexSlice;
@@ -27,6 +27,20 @@ use crate::pv_utils::try_copy_slice_to_array;
 pub fn phkh_v1<T: AsRef<PKeyRef<Public>>>(key: T) -> Result<[u8; 32]> {
     let phk: EcPubKeyCoord = key.as_ref().try_into()?;
     let binding = hash(MessageDigest::sha256(), phk.as_ref())?;
+    try_copy_slice_to_array(&binding)
+}
+
+/// Try to hash the public hybrid EC + ML-KEM key.
+///
+/// # Errors
+///
+/// This function will return an error if OpenSSL could not hash the key.
+pub fn phkh_v2(key: &HybridPKey) -> Result<[u8; 64]> {
+    let mut buf: Vec<u8> = vec![];
+    let phk: EcPubKeyCoord = key.ec_key().try_into()?;
+    buf.extend_from_slice(phk.as_ref());
+    buf.extend_from_slice(&key.mlkem_key().raw_public_key()?);
+    let binding = hash(MessageDigest::sha512(), &buf)?;
     try_copy_slice_to_array(&binding)
 }
 
@@ -107,6 +121,58 @@ impl TryFrom<Vec<u8>> for BinaryKeySlotV1 {
             phkh: data[..32].try_into().unwrap(),
             wrpk: data[32..64].try_into().unwrap(),
             kst: data[64..].try_into().unwrap(),
+        };
+        Ok(bin)
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq, Clone, DekuRead, DekuWrite, Serialize, Deserialize)]
+#[deku(endian = "endian", ctx = "endian: Endian", ctx_default = "Endian::Big")]
+/// Binary key slot v1
+pub struct BinaryKeySlotV2 {
+    #[serde(with = "serde_hex_array", rename = "phkh_hex")]
+    /// Public host key hash
+    pub phkh: [u8; 64],
+    #[serde(with = "serde_hex_array", rename = "wrpk_hex")]
+    /// Wrapper key
+    pub wrpk: [u8; 32],
+    /// Tag
+    #[serde(with = "serde_hex_array", rename = "kst_hex")]
+    pub kst: [u8; 16],
+    #[serde(with = "serde_hex_array", rename = "kc_hex")]
+    /// Ciohertext
+    pub kc: [u8; 1568],
+}
+static_assert!(size_of::<BinaryKeySlotV2>() == 1680);
+
+impl Display for BinaryKeySlotV2 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "target key hash: {:}", HexSlice::from(&self.phkh))
+    }
+}
+
+impl Default for BinaryKeySlotV2 {
+    fn default() -> Self {
+        BinaryKeySlotV2 {
+            phkh: [0_u8; 64],
+            wrpk: [0_u8; 32],
+            kst: [0_u8; 16],
+            kc: [0_u8; 1568],
+        }
+    }
+}
+
+impl TryFrom<Vec<u8>> for BinaryKeySlotV2 {
+    type Error = Error;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        let data: [u8; 1680] = try_copy_slice_to_array(&value)?;
+        let bin = Self {
+            phkh: data[..64].try_into().unwrap(),
+            wrpk: data[64..96].try_into().unwrap(),
+            kst: data[96..112].try_into().unwrap(),
+            kc: data[112..].try_into().unwrap(),
         };
         Ok(bin)
     }

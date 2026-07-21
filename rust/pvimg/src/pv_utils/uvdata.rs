@@ -3,12 +3,10 @@
 // Copyright IBM Corp. 2024
 
 use enum_dispatch::enum_dispatch;
-use pv::request::openssl::pkey::{PKey, PKeyRef, Private, Public};
-use pv::request::{
-    decrypt_aead, derive_aes256_gcm_key, encrypt_aead, Confidential, SymKey, SymKeyType,
-};
+use pv::request::openssl::pkey::{PKey, Public};
+use pv::request::{decrypt_aead, encrypt_aead, Confidential, SymKey, SymKeyType};
 
-use super::se_hdr::{SeHdrBinV1, SeHdrData, SeHdrVersioned};
+use super::se_hdr::{SeHdrBinV1, SeHdrBinV2, SeHdrData, SeHdrVersioned};
 use crate::pv_utils::error::{Error, Result};
 use crate::pv_utils::serializing::deserialize_from_bytes;
 
@@ -54,15 +52,19 @@ pub trait AeadPlainDataTrait {
 }
 
 /// Key exchange related methods
-#[enum_dispatch]
 pub trait KeyExchangeTrait {
-    /// Checks if a public key was used.
+    type TargetKeyType;
+    type PrivateKeyType: ToOwned;
+
+    /// Checks if a public target key was used.
     ///
     /// # Errors
     ///
     /// This function will return an error if the public key cannot be converted
     /// into a hash.
-    fn contains<K: AsRef<PKeyRef<Public>>>(&self, key: K) -> Result<bool>;
+    fn contains<K>(&self, key: K) -> Result<bool>
+    where
+        K: AsRef<Self::TargetKeyType>;
 
     /// Checks if the hash of a public key was used.
     fn contains_hash<H: AsRef<[u8]>>(&self, hash: H) -> bool;
@@ -79,22 +81,24 @@ pub trait KeyExchangeTrait {
     /// Returns the key type of the exchanged key.
     fn key_type(&self) -> SymKeyType;
 
-    /// Derive the key.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if there is no customer public key is
-    /// available or the key derivations fails.
-    fn derive_key<K: AsRef<PKeyRef<Private>>>(&mut self, other_priv_key: K) -> Result<SymKey> {
-        match self.key_type() {
-            SymKeyType::Aes256Gcm => Ok(derive_aes256_gcm_key(
-                other_priv_key.as_ref(),
-                self.cust_pub_key()?.as_ref(),
-            )?
-            .into()),
-            _ => unreachable!("BUG"),
-        }
-    }
+    // TODO Implement it
+    // /// Derive the key.
+    // ///
+    // /// # Errors
+    // ///
+    // /// This function will return an error if there is no customer public key is
+    // /// available or the key derivations fails.
+    // fn derive_key<K>(&mut self, other_priv_key: K) -> Result<SymKey> where
+    // K: AsRef<Self::PrivateKeyType>{
+    //     match self.key_type() {
+    //         SymKeyType::Aes256Gcm =>
+    //             match Self::TargetKeyType {
+    //                 PKeyRef::<Public> => {todo!()},
+    //                 HybridPKey => {todo!()},
+    //             }
+    //         _ => unreachable!("BUG"),
+    //     }
+    // }
 }
 
 /// Trait to be used for plain UV data.

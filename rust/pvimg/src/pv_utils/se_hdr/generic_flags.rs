@@ -104,6 +104,12 @@ pub enum SeTarget {
     /// Targets the most recent V1 SE header format with all available V1 control flags.
     /// Use this for maximum compatibility with older machine generations that support V1.
     V1Max,
+
+    /// Latest V2 configuration.
+    ///
+    /// Targets the most recent V2 SE header format with all available V2 control flags.
+    /// Use this for newest features and machine generations that support V2.
+    V2Max,
 }
 
 impl SeTarget {
@@ -111,6 +117,7 @@ impl SeTarget {
     pub fn to_se_hdr_version(self) -> SeHdrVersion {
         match self {
             SeTarget::V1Max => SeHdrVersion::V1,
+            SeTarget::V2Max => SeHdrVersion::V2,
         }
     }
 
@@ -118,6 +125,7 @@ impl SeTarget {
     pub fn from_se_hdr_version(version: SeHdrVersion) -> Self {
         match version {
             SeHdrVersion::V1 => SeTarget::V1Max,
+            SeHdrVersion::V2 => SeTarget::V2Max,
         }
     }
 }
@@ -126,6 +134,7 @@ impl Display for SeTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SeTarget::V1Max => write!(f, "V1-max"),
+            SeTarget::V2Max => write!(f, "V2-max"),
         }
     }
 }

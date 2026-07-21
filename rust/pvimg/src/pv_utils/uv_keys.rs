@@ -49,7 +49,8 @@ pub struct UvKeyHashesV1 {
 }
 
 impl UvKeyHashV1 {
-    pub const UV_KEY_HASH_NULL: Self = Self([0x0_u8; 32]);
+    pub const UV_KEY_HASH_SIZE: usize = 32;
+    pub const UV_KEY_HASH_NULL: Self = Self([0x0_u8; Self::UV_KEY_HASH_SIZE]);
 }
 
 impl AsRef<[u8]> for UvKeyHashV1 {

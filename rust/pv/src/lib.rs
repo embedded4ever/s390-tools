@@ -89,14 +89,15 @@ pub use crate::error::HkdVerifyErrorType;
 
 /// Functionalities to build UV requests
 pub mod request {
-    pub use crate::brcb::{seek_se_hdr_start, BootHdrTags, SeImgMetaData};
+    pub use crate::brcb::{seek_se_hdr_start, BootHdrTags, SeHdrVersion, SeImgMetaData};
     pub use crate::crypto::{
         decrypt_aead, derive_aes256_gcm_key, encrypt_aead, gen_ec_key, random_array,
         AeadDecryptionResult, AeadEncryptionResult, Aes256GcmKey, Aes256XtsKey, SymKey, SymKeyType,
         SHA_512_HASH_LEN,
     };
     pub use crate::req::{
-        EcPubKeyCoord, Encrypt, HostKey, HybridPKey, Keyslot, ReqEncrCtx, Request,
+        EcPubKeyCoord, Encrypt, HostKey, HybridPKey, Keyslot, KeyslotV1, KeyslotV2, ReqEncrCtx,
+        Request,
     };
     pub use crate::verify::{CertVerifier, HkdVerifier, NoVerifyHkd};
 

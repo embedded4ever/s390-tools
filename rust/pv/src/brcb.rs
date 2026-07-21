@@ -17,6 +17,8 @@ use crate::{assert_size, request::MagicValue, static_assert, Error, Result, PAGE
 pub enum SeHdrVersion {
     /// Secure Execution header v1
     One = 0x100,
+    /// Secure Execution header v2
+    Two = 0x200,
 }
 
 /// Struct containing all SE-header tags.
@@ -241,6 +243,7 @@ impl BootHdrTags {
         // Some sanity checks
         let hdr_version = match hdr_head.version.get() {
             0x100 => SeHdrVersion::One,
+            0x200 => SeHdrVersion::Two,
             _ => {
                 debug!("Unsupported hdr-version: {:0>4x}", hdr_head.version.get());
                 return Err(Error::InvBootHdr);
