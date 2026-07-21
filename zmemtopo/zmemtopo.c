@@ -540,8 +540,8 @@ static void table_print_row(char **buf, struct partition *cur,
 	unsigned int i, s_padding;
 
 	s_padding = vdata->entry_len >= SUM_PAD ? vdata->entry_len : SUM_PAD;
-	concat_w_padding(buf, LPAR_NO_LEN, 0, "%2d", cur->part_nr);
-	concat_w_padding(buf, LPAR_NAME_LEN, 0, "%s", cur->part_name);
+	concat_w_padding(buf, LPAR_NO_LEN, 1, "%2d", cur->part_nr);
+	concat_w_padding(buf, LPAR_NAME_LEN, 1, "%s", cur->part_name);
 	concat_w_padding(buf, s_padding, 0, "%lu", cur->increment_total);
 	entries = &cur->entries[g.nesting_level - 1];
 	for (i = 0; i < entries->count; i++) {
@@ -579,8 +579,8 @@ static void table_print_header(char **buf, struct view_data *vdata)
 		}
 		util_concatf(buf, "\n");
 	}
-	util_concatf(buf, "%*s", LPAR_NO_LEN, "NR");
-	util_concatf(buf, "%*s", LPAR_NAME_LEN, "LPAR");
+	util_concatf(buf, "%-*s", LPAR_NO_LEN, "NR");
+	util_concatf(buf, "%-*s", LPAR_NAME_LEN, "LPAR");
 	util_concatf(buf, "%*s\n", s_padding, "SUM");
 }
 
