@@ -14,9 +14,9 @@ static LOGGER: PvLogger = PvLogger;
 
 fn main() -> Result<()> {
     LOGGER.start(LevelFilter::Trace)?;
-    cli::CliOptions::parse()
-        .certificate_args
-        .get_verified_hkds("info")?;
+    let opt = cli::CliOptions::parse();
+    opt.certificate_args
+        .get_verified_hkds_new("info", opt.hkd_version.map(|v| v.into()))?;
     info!("Host-key documents verified.");
     Ok(())
 }

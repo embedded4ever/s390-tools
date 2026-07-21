@@ -3,10 +3,35 @@
 // Copyright IBM Corp. 2025
 use std::sync::OnceLock;
 
-use clap::{ArgAction, Parser};
-use utils::CertificateOptions;
+use clap::{ArgAction, Parser, ValueEnum};
+use utils::{
+    AutoOrExplicit, AutoOrExplicitParser, CertificateOptions, HkdVersion, ValueEnumDisplay,
+    ValueEnumFromStr,
+};
 
 static VERSION: OnceLock<String> = OnceLock::new();
+
+/// Secure Execution HostKey version for CLI
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, ValueEnumDisplay, ValueEnumFromStr)]
+pub enum HostKeyVersion {
+    #[value(name = "1")]
+    /// Version 1 - uses traditional cryptographic keys
+    V1,
+    #[value(name = "2")]
+    /// Version 2 - uses hybrid (post-quantum) cryptographic keys
+    V2,
+}
+pub type HostKeyVersionSelection = AutoOrExplicit<HostKeyVersion>;
+pub type HostKeyVersionSelectionParser = AutoOrExplicitParser<HostKeyVersion>;
+
+impl From<HostKeyVersion> for HkdVersion {
+    fn from(val: HostKeyVersion) -> Self {
+        match val {
+            HostKeyVersion::V1 => Self::Classical,
+            HostKeyVersion::V2 => Self::Hybrid,
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(long_version=ver(), disable_version_flag(true))]
@@ -23,6 +48,10 @@ pub struct CliOptions {
     #[arg(long, action=ArgAction::Version)]
     /// Print version information and exit.
     version: (),
+
+    /// Specify the Host-key version to use.
+    #[arg(long = "hkd-version", value_name = "VERSION", default_value_t = HostKeyVersionSelection::Auto, value_parser = HostKeyVersionSelectionParser::default())]
+    pub hkd_version: HostKeyVersionSelection,
 }
 
 fn ver() -> &'static str {

@@ -6,7 +6,7 @@
 use std::env;
 use std::io::Error;
 
-use clap::{CommandFactory, ValueEnum};
+use clap::CommandFactory;
 use clap_complete::{generate_to, Shell};
 
 include!("src/cli.rs");
