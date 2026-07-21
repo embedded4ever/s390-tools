@@ -10,11 +10,11 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Error};
-use clap::{Parser, ValueHint};
-use log::{info, warn};
-use pv::misc::{decode_hex, open_file, read_certs, read_file, try_parse_u64};
-use pv::request::SymKeyType;
-use pv::{Error as PvError, Result};
+use clap::{Parser, ValueEnum, ValueHint};
+use log::info;
+use pv::misc::{decode_hex, open_file, read_file, read_hkd, try_parse_u64};
+use pv::request::{HostKey, SymKeyType};
+use pv::Result;
 use pvimg::misc::PSW;
 use pvimg::secured_comp::{ComponentTrait, Layout, SecuredComponentBuilder};
 use pvimg::uvdata::{BuilderTrait, SeHdrBuilder, SeHdrControlFlags, SeHdrVersion, SeTarget};
@@ -87,6 +87,38 @@ impl Display for ComponentArg {
     }
 }
 
+/// SE-header version selection
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SeHdrVersionArg {
+    /// SE-header version 1
+    #[value(name = "1")]
+    V1,
+    /// SE-header version 2
+    #[value(name = "2")]
+    V2,
+}
+
+impl From<SeHdrVersionArg> for SeHdrVersion {
+    fn from(arg: SeHdrVersionArg) -> Self {
+        match arg {
+            SeHdrVersionArg::V1 => SeHdrVersion::V1,
+            SeHdrVersionArg::V2 => SeHdrVersion::V2,
+        }
+    }
+}
+
+impl SeHdrVersionArg {
+    /// Detect the SE header version from the keys.
+    /// Returns V2 if any key is hybrid, otherwise V1.
+    pub fn detect<K: AsRef<[HostKey]>>(keys: K) -> Self {
+        if keys.as_ref().iter().any(|k| !k.is_hybrid()) {
+            Self::V1
+        } else {
+            Self::V2
+        }
+    }
+}
+
 /// Create a Secure Execution header.
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -128,6 +160,10 @@ pub struct Args {
     /// Secure Execution header output location.
     #[arg(short, long)]
     pub output: PathBuf,
+
+    /// SE-header version to build
+    #[arg(long, value_enum)]
+    version: Option<SeHdrVersionArg>,
 
     #[clap(flatten)]
     pub verbosity: VerbosityOptions,
@@ -203,34 +239,26 @@ fn main() -> anyhow::Result<()> {
     info!("\n# Creating Secure Execution Header");
     let addr = args.psw_addr;
     let mask = args.psw_mask;
-    let version = SeHdrVersion::V1;
-    let mut builder = SeHdrBuilder::new(version, PSW { addr, mask }, secure_comp_builer.finish()?)?;
     let mut target_pub_keys = vec![];
     for hkd_path in args.host_key_documents {
         info!(
             "Use the file '{}' as a host key document",
             hkd_path.display()
         );
-        let hkd_data = read_file(&hkd_path, "host key document")?;
-        let certs = read_certs(&hkd_data)?;
-        if certs.is_empty() {
-            return Err(PvError::NoHkdInFile(hkd_path.display().to_string()).into());
-        }
-
-        if certs.len() > 1 {
-            warn!("The host key document in '{}' contains more than one certificate! All keys will be used.",
-                  hkd_path.display());
-        }
-
-        for cert in &certs {
-            target_pub_keys.push(cert.public_key()?);
-        }
+        let cert = read_hkd(&hkd_path)?;
+        target_pub_keys.push(cert);
     }
-    builder.add_hostkeys(&target_pub_keys)?;
-
+    let version: SeHdrVersion = args
+        .version
+        .unwrap_or(SeHdrVersionArg::detect(&target_pub_keys))
+        .into();
     let target = SeTarget::from_se_hdr_version(version);
     let pcf = SeHdrControlFlags::from_u64(try_parse_u64(&args.pcf, "pcf")?, target, true);
     let scf = SeHdrControlFlags::from_u64(try_parse_u64(&args.scf, "scf")?, target, false);
+    info!("SE-header version ...: {}", version);
+    let mut builder = SeHdrBuilder::new(version, PSW { addr, mask }, secure_comp_builer.finish()?)?;
+    builder.add_hostkeys(&target_pub_keys)?;
+
     info!(
         "PSW addr ............: {addr:#018x}\n\
          PSW mask ............: {mask:#018x}\n\

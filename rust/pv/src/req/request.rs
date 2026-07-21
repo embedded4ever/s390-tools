@@ -148,10 +148,9 @@ mod tests {
     use zerocopy::IntoBytes;
 
     use super::*;
+    use crate::crypto::SymKey;
     use crate::get_test_asset;
-    use crate::req::header::RequestHdr;
-    use crate::req::{Aad, HostKey, Keyslot, ReqEncrCtx};
-    use crate::request::SymKey;
+    use crate::req::{Aad, HybridPKey, Keyslot};
     use crate::test_utils::*;
 
     static TEST_MAGIC: [u8; 8] = 0x12345689abcdef00u64.to_be_bytes();
@@ -188,6 +187,37 @@ mod tests {
     }
 
     #[test]
+    fn encr_build_aad_v2() {
+        let (cust_key, host_key1, host_key2) = get_test_keys_hybrid();
+        let ks = Keyslot::new(HostKey::V2(HybridPKey::new(host_key1, host_key2).unwrap()));
+        let ctx = ReqEncrCtx::new_aes_256(
+            Some([0x11; 12]),
+            Some(cust_key),
+            Some(SymKey::Aes256([0x17; 32].into())),
+        )
+        .unwrap();
+        let v = [0x55; 8];
+        let aad = Aad::Plain(&v);
+        let aad = ctx
+            .build_aad(0x200, &vec![aad, Aad::Ks(&ks)], 16, Some(TEST_MAGIC))
+            .unwrap();
+
+        let aad_exp = vec![
+            0x12, 0x34, 0x56, 0x89, 0xab, 0xcd, 0xef, 0, // progr
+            0, 0, 2, 0, // vers
+            0, 0, 6, 232, // size
+            0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, // iv
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // res
+            1, // nks
+            0, 0, 0, 0, // res
+            0, 0, 0, 16, // sea
+            0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, // aad
+        ];
+        // only compare non-randomized part
+        assert_eq!(aad[..aad_exp.len()], aad_exp);
+    }
+
+    #[test]
     fn encr_build_aad_nks_no() {
         let ctx = ReqEncrCtx::new_aes_256(Some([0x11; 12]), None, None).unwrap();
 
@@ -210,10 +240,44 @@ mod tests {
         let aad = ctx.build_aad(0x200, &aad, 16, Some(TEST_MAGIC));
         assert!(matches!(aad, Err(Error::ManyHostkeys)));
     }
+
+    #[test]
+    fn encr_build_aad_nks_many_v2() {
+        let (_, host_key1, host_key2) = get_test_keys_hybrid();
+        let host_key = HostKey::V2(HybridPKey::new(host_key1, host_key2).unwrap());
+        let ctx = ReqEncrCtx::new_aes_256(Some([0x11; 12]), None, None).unwrap();
+
+        let ks: Vec<Keyslot> = (0..257).map(|_| Keyslot::new(host_key.clone())).collect();
+        let mut aad = Vec::<Aad>::new();
+        ks.iter().for_each(|ks| aad.push(Aad::Ks(ks)));
+
+        let aad = ctx.build_aad(0x200, &aad, 16, Some(TEST_MAGIC));
+        assert!(matches!(aad, Err(Error::ManyHostkeys)));
+    }
+
     #[test]
     fn encr_build_aad_nks() {
         let (_, host_key) = get_test_keys();
         let host_key = HostKey::V1(host_key);
+        let ctx = ReqEncrCtx::new_aes_256(Some([0x11; 12]), None, None).unwrap();
+
+        let ks = [
+            Keyslot::new(host_key.clone()),
+            Keyslot::new(host_key.clone()),
+            Keyslot::new(host_key),
+        ];
+        let mut aad = Vec::<Aad>::new();
+        ks.iter().for_each(|ks| aad.push(Aad::Ks(ks)));
+
+        let aad = ctx.build_aad(0x200, &aad, 16, Some(TEST_MAGIC)).unwrap();
+
+        assert_eq!(aad.get(39).unwrap(), &3u8);
+    }
+
+    #[test]
+    fn encr_build_aad_nks_v2() {
+        let (_, host_key1, host_key2) = get_test_keys_hybrid();
+        let host_key = HostKey::V2(HybridPKey::new(host_key1, host_key2).unwrap());
         let ctx = ReqEncrCtx::new_aes_256(Some([0x11; 12]), None, None).unwrap();
 
         let ks = [
