@@ -133,6 +133,7 @@ impl RetrievedSecret {
             RetrievedSecret::ProtectedKey(p) => p.into_bytes(),
         }
     }
+
     /// Get the data in PEM format.
     ///
     /// # Errors

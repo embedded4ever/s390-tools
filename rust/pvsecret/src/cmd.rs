@@ -8,7 +8,7 @@ pub use create::create;
 mod verify;
 pub use verify::verify;
 
-pub const CMD_FN: &[&str] = &["+create", "+verify"];
+pub const CMD_FN: &[&str] = &["+create", "+verify", "+quantumsafe"];
 
 #[cfg(target_arch = "s390x")]
 mod add;

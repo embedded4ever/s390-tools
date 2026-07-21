@@ -7,7 +7,8 @@ use std::fmt::Display;
 use clap::error::ErrorKind::ValueValidation;
 use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use utils::{
-    combined_path_opt, combined_path_req, CertificateOptions, DeprecatedVerbosityOptions, STDOUT,
+    combined_path_opt, combined_path_req, AutoOrExplicit, CertificateOptions,
+    DeprecatedVerbosityOptions, HkdVersion, ValueEnumDisplay, ValueEnumFromStr, STDOUT,
 };
 
 /// Manage secrets for IBM Secure Execution guests.
@@ -32,6 +33,28 @@ pub struct CliOptions {
 pub enum CreateSecretFlags {
     /// Disables host-initiated dumping for the target guest instance.
     DisableDump,
+}
+
+/// Secure Execution add secret version for CLI
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, ValueEnumDisplay, ValueEnumFromStr)]
+pub enum SecretVersion {
+    #[value(name = "1")]
+    /// Version 1 - uses traditional cryptographic keys
+    V1,
+    #[value(name = "2")]
+    /// Version 2 - uses hybrid (post-quantum) cryptographic keys
+    V2,
+}
+
+pub type SecretVersionSelection = AutoOrExplicit<SecretVersion>;
+
+impl From<SecretVersion> for HkdVersion {
+    fn from(val: SecretVersion) -> Self {
+        match val {
+            SecretVersion::V1 => Self::Classical,
+            SecretVersion::V2 => Self::Hybrid,
+        }
+    }
 }
 
 #[derive(Args, Debug)]
@@ -173,6 +196,10 @@ pub struct CreateSecretOpt {
     /// Ignored for meta-secrets.
     #[arg(long)]
     pub use_name: bool,
+
+    /// Specify the Add-secret version to use.
+    #[arg(long = "secret-version", value_name = "VERSION", default_value_t = SecretVersion::V1)]
+    pub secret_version: SecretVersion,
 }
 
 #[derive(Subcommand, Debug)]

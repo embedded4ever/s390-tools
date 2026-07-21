@@ -16,6 +16,7 @@ use super::asrcb::AddSecretRequest;
 use crate::crypto::{hash, random_array, SymKeyType};
 use crate::request::openssl::{NID_ED25519, NID_ED448};
 use crate::request::Confidential;
+use crate::secret::AddSecretVersion;
 use crate::uv::{
     AesSizes, AesXtsSizes, EcCurves, HmacShaSizes, ListableSecretType, RetrievableSecret,
     RetrieveCmd, SecretId,
@@ -388,12 +389,18 @@ pub(crate) enum SecretAuth {
 }
 
 impl SecretAuth {
-    const NULL_HDR: NullSecretHdr = NullSecretHdr::new();
+    const NULL_HDR_V1: NullSecretHdrV1 = NullSecretHdrV1::new();
+    const NULL_HDR_V2: NullSecretHdrV2 = NullSecretHdrV2::new();
     const UPDATE_CCK_HDR: UpdateCckHdr = UpdateCckHdr::new();
 
-    pub fn get(&self) -> &[u8] {
+    pub fn get(&self, version: AddSecretVersion) -> &[u8] {
         match self {
-            Self::Null => Self::NULL_HDR.as_bytes(),
+            Self::Null => match version {
+                AddSecretVersion::One => Self::NULL_HDR_V1.as_bytes(),
+                AddSecretVersion::Two => Self::NULL_HDR_V2.as_bytes(),
+                #[cfg(any(debug_assertions, test))]
+                _ => panic!("Invalid AddSecretVersion"),
+            },
             Self::Listable(h) => h.as_bytes(),
             Self::UpdateCck => Self::UPDATE_CCK_HDR.as_bytes(),
         }
@@ -402,21 +409,44 @@ impl SecretAuth {
 
 #[repr(C)]
 #[derive(Debug, IntoBytes, FromBytes, Immutable, KnownLayout)]
-struct NullSecretHdr {
+struct NullSecretHdrV1 {
     res0: u16,
     kind: U16<BigEndian>,
     secret_len: U32<BigEndian>,
     res8: u64,
 }
-assert_size!(NullSecretHdr, 0x10);
+assert_size!(NullSecretHdrV1, 0x10);
 
-impl NullSecretHdr {
+impl NullSecretHdrV1 {
     const fn new() -> Self {
         Self {
             res0: 0,
             kind: U16::new(ListableSecretType::NULL),
             secret_len: U32::ZERO,
             res8: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, IntoBytes, FromBytes, Immutable, KnownLayout)]
+struct NullSecretHdrV2 {
+    res0: u16,
+    kind: U16<BigEndian>,
+    secret_len: U32<BigEndian>,
+    res8: u64,
+    reserved1: [u8; 32],
+}
+assert_size!(NullSecretHdrV2, 0x30);
+
+impl NullSecretHdrV2 {
+    const fn new() -> Self {
+        Self {
+            res0: 0,
+            kind: U16::new(ListableSecretType::NULL),
+            secret_len: U32::ZERO,
+            res8: 0,
+            reserved1: [0; 32],
         }
     }
 }
@@ -701,7 +731,7 @@ mod test {
         let gs_bytes = gs.auth();
         let exp = vec![0u8, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-        assert_eq!(exp, gs_bytes.get());
+        assert_eq!(exp, gs_bytes.get(AddSecretVersion::One));
         assert_eq!(&Vec::<u8>::new(), gs.confidential())
     }
 
@@ -716,7 +746,7 @@ mod test {
         let mut exp = vec![0u8, 0, 0, 2, 0, 0, 0, 0x20, 0, 0, 0, 0, 0, 0, 0, 0];
         exp.extend([1; 32]);
 
-        assert_eq!(exp, gs_bytes_auth.get());
+        assert_eq!(exp, gs_bytes_auth.get(AddSecretVersion::One));
         assert_eq!(&[2; 32], gs.confidential());
     }
 
@@ -729,7 +759,7 @@ mod test {
             secret: vec![2; 32].into(),
         };
         let auth = gs.auth();
-        let gs_bytes_auth = auth.get();
+        let gs_bytes_auth = auth.get(AddSecretVersion::One);
         let mut exp = vec![0u8, 0, 0, 3, 0, 0, 0, 0x20, 0, 0, 0, 0, 0, 0, 0, 0];
         exp.extend([1; 32]);
 
@@ -746,7 +776,7 @@ mod test {
         let mut exp = vec![0u8, 0, 0, 0x16, 0, 0, 0, 0x20];
         exp.extend([0; 40]);
 
-        assert_eq!(exp, gs_bytes_auth.get());
+        assert_eq!(exp, gs_bytes_auth.get(AddSecretVersion::One));
         assert_eq!(&[2; 32], gs.confidential());
     }
 }

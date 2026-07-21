@@ -64,8 +64,11 @@ pub enum Error {
     #[error("No user-key for verification provided and user-data is signed")]
     BinAsrcbNoUserDataSgnKey,
 
-    #[error("Input does not contain an add-secret request version 1")]
-    BinAsrcbInvVersion,
+    #[error("Input contains an unknown add-secret request version {0}")]
+    BinAsrcbInvVersion(u32),
+
+    #[error("Unsupported add-secret request version: {0}")]
+    UnsupportedAddSecretVersion(u32),
 
     #[error("Provided user-data key type ({key}) does not match with the user-data ({kind})")]
     AsrcbUserDataKeyMismatch { key: String, kind: UserDataType },

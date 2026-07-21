@@ -6,13 +6,13 @@
 use openssl::ec::{EcGroup, EcKey};
 use openssl::nid::Nid;
 use openssl::pkey::Private;
-use s390_pv::request::openssl::pkey::{PKey, Public};
-use s390_pv::request::{BootHdrTags, HostKey, ReqEncrCtx, Request, SymKey};
+use s390_pv::request::openssl::pkey::PKey;
+use s390_pv::request::{BootHdrTags, HostKey, HybridPKey, ReqEncrCtx, Request, SymKey};
 use s390_pv::secret::{
     verify_asrcb_and_get_user_data, AddSecretFlags, AddSecretRequest, AddSecretVersion, ExtSecret,
     GuestSecret,
 };
-use s390_pv::test_utils::get_test_keys;
+use s390_pv::test_utils::{get_test_keys, get_test_keys_hybrid, DeterministicTestRandGuard};
 use s390_pv::uv::ConfigUid;
 use s390_pv::{get_test_asset, Result};
 
@@ -29,8 +29,13 @@ fn create_asrcb(
     hkd: HostKey,
     ctx: &ReqEncrCtx,
 ) -> Result<Vec<u8>> {
-    let mut asrcb = AddSecretRequest::new(AddSecretVersion::One, guest_secret, TAGS, flags);
+    let asrcb = match hkd {
+        HostKey::V1(_) => AddSecretRequest::new(AddSecretVersion::One, guest_secret, TAGS, flags),
+        HostKey::V2(_) => AddSecretRequest::new(AddSecretVersion::Two, guest_secret, TAGS, flags),
+        _ => unreachable!("Unknown HostKey version"),
+    };
 
+    let mut asrcb = asrcb?;
     if let Some(s) = ext_secret {
         asrcb.set_ext_secret(s)?
     };
@@ -42,8 +47,21 @@ fn create_asrcb(
     asrcb.encrypt(ctx)
 }
 
-fn get_crypto() -> (PKey<Public>, ReqEncrCtx) {
+fn get_crypto() -> (HostKey, ReqEncrCtx) {
     let (cust_key, host_key) = get_test_keys();
+    let host_key = HostKey::V1(host_key);
+    let ctx = ReqEncrCtx::new_aes_256(
+        Some([0x55; 12]),
+        Some(cust_key),
+        Some(SymKey::Aes256([0x17; 32].into())),
+    )
+    .unwrap();
+    (host_key, ctx)
+}
+
+fn get_crypto_v2() -> (HostKey, ReqEncrCtx) {
+    let (cust_key, host_key1, host_key2) = get_test_keys_hybrid();
+    let host_key = HostKey::V2(HybridPKey::new(host_key1, host_key2).unwrap());
     let ctx = ReqEncrCtx::new_aes_256(
         Some([0x55; 12]),
         Some(cust_key),
@@ -67,14 +85,25 @@ where
         true => Some(CUID),
         false => None,
     };
-    create_asrcb(
-        guest_secret,
-        ext_secret.into(),
-        flags,
-        cuid,
-        HostKey::V1(host_key),
-        &ctx,
-    )
+    create_asrcb(guest_secret, ext_secret.into(), flags, cuid, host_key, &ctx)
+}
+
+fn gen_asrcb_v2<E>(
+    guest_secret: GuestSecret,
+    ext_secret: E,
+    flags: AddSecretFlags,
+    cuid: bool,
+) -> Result<Vec<u8>>
+where
+    E: Into<Option<ExtSecret>>,
+{
+    let _guard = DeterministicTestRandGuard::install(&[0x42; 4096], &[0x11; 32]).unwrap();
+    let (host_key, ctx) = get_crypto_v2();
+    let cuid = match cuid {
+        true => Some(CUID),
+        false => None,
+    };
+    create_asrcb(guest_secret, ext_secret.into(), flags, cuid, host_key, &ctx)
 }
 
 fn association() -> GuestSecret {
@@ -96,9 +125,21 @@ fn no_flag() -> AddSecretFlags {
 fn create_signed_asrcb(skey: PKey<Private>, user_data: Vec<u8>) -> Vec<u8> {
     let (host_key, ctx) = get_crypto();
     let mut asrcb =
-        AddSecretRequest::new(AddSecretVersion::One, GuestSecret::Null, TAGS, no_flag());
+        AddSecretRequest::new(AddSecretVersion::One, GuestSecret::Null, TAGS, no_flag())
+            .expect("AddSecretRequest::new failed");
 
-    asrcb.add_hostkey(HostKey::V1(host_key));
+    asrcb.add_hostkey(host_key);
+    asrcb.set_user_data(user_data, Some(skey)).unwrap();
+    asrcb.encrypt(&ctx).unwrap()
+}
+
+fn create_signed_asrcb_v2(skey: PKey<Private>, user_data: Vec<u8>) -> Vec<u8> {
+    let (host_key, ctx) = get_crypto_v2();
+    let mut asrcb =
+        AddSecretRequest::new(AddSecretVersion::Two, GuestSecret::Null, TAGS, no_flag())
+            .expect("AddSecretRequest::new failed");
+
+    asrcb.add_hostkey(host_key);
     asrcb.set_user_data(user_data, Some(skey)).unwrap();
     asrcb.encrypt(&ctx).unwrap()
 }
@@ -108,9 +149,10 @@ fn null_none_default_ncuid_one_user_unsgn() {
     let user_data_orig = vec![0x56; 0x183];
     let (host_key, ctx) = get_crypto();
     let mut asrcb =
-        AddSecretRequest::new(AddSecretVersion::One, GuestSecret::Null, TAGS, no_flag());
+        AddSecretRequest::new(AddSecretVersion::One, GuestSecret::Null, TAGS, no_flag())
+            .expect("AddSecretRequest::new failed");
 
-    asrcb.add_hostkey(HostKey::V1(host_key));
+    asrcb.add_hostkey(host_key);
     asrcb.set_user_data(user_data_orig.clone(), None).unwrap();
     let asrcb = asrcb.encrypt(&ctx).unwrap();
 
@@ -121,6 +163,7 @@ fn null_none_default_ncuid_one_user_unsgn() {
         &user_data.as_ref().unwrap()[..user_data_orig.len()]
     );
 }
+
 #[test]
 fn null_none_default_ncuid_one_user_ec() {
     let (usr_sgn_key, _) = get_test_keys();
@@ -242,8 +285,9 @@ fn null_none_default_ncuid_one() {
 fn null_none_default_cuid_seven() {
     let (hkd, ctx) = get_crypto();
     let mut asrcb =
-        AddSecretRequest::new(AddSecretVersion::One, GuestSecret::Null, TAGS, no_flag());
-    (0..7).for_each(|_| asrcb.add_hostkey(HostKey::V1(hkd.clone())));
+        AddSecretRequest::new(AddSecretVersion::One, GuestSecret::Null, TAGS, no_flag())
+            .expect("AddSecretRequest::new failed");
+    (0..7).for_each(|_| asrcb.add_hostkey(hkd.clone()));
     asrcb.set_cuid(CUID);
     let asrcb = asrcb.encrypt(&ctx).unwrap();
 

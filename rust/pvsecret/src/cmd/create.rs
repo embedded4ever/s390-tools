@@ -22,7 +22,10 @@ use serde_yaml::Value;
 use utils::get_writer_from_cli_file_arg;
 use zerocopy::IntoBytes;
 
-use crate::cli::{AddSecretType, CreateSecretFlags, CreateSecretOpt, RetrieveableSecretInpKind};
+use crate::cli::{
+    AddSecretType, CreateSecretFlags, CreateSecretOpt, RetrieveableSecretInpKind, SecretVersion,
+    SecretVersionSelection,
+};
 
 fn write_out<P, D>(path: &P, data: D, ctx: &str) -> pv::Result<()>
 where
@@ -83,6 +86,41 @@ fn retrievable(name: &str, secret: &str, kind: &RetrieveableSecretInpKind) -> Re
     .map_err(Error::from)
 }
 
+/// Auto-detect the Add-secret version based on the host keys.
+///
+/// Returns Two if any host key is a hybrid key, otherwise returns V1.
+fn auto_detect_version(host_keys: &[HostKey]) -> AddSecretVersion {
+    let use_hybrid_keys = host_keys.iter().any(|k: &HostKey| k.is_hybrid());
+    if use_hybrid_keys {
+        AddSecretVersion::Two
+    } else {
+        AddSecretVersion::One
+    }
+}
+
+impl From<SecretVersion> for AddSecretVersion {
+    fn from(value: SecretVersion) -> Self {
+        match value {
+            SecretVersion::V1 => Self::One,
+            SecretVersion::V2 => Self::Two,
+        }
+    }
+}
+
+/// Determine the attestation  version to use.
+///
+/// If an explicit version is provided via CLI, use that.
+/// Otherwise, auto-detect based on the host key types.
+fn determine_version(
+    cli_version: SecretVersionSelection,
+    host_keys: &[HostKey],
+) -> AddSecretVersion {
+    match cli_version {
+        SecretVersionSelection::Auto => auto_detect_version(host_keys),
+        SecretVersionSelection::Explicit(att_version) => att_version.into(),
+    }
+}
+
 /// Prepare an add-secret request
 pub fn create(opt: &CreateSecretOpt) -> Result<()> {
     if pv_guest_bit_set() {
@@ -94,16 +132,8 @@ pub fn create(opt: &CreateSecretOpt) -> Result<()> {
         }
     }
 
-    let mut asrcb = build_asrcb(opt)?;
+    let asrcb = build_asrcb(opt)?;
     debug!("Generated Add-secret request");
-
-    // Add host-key documents
-    opt.certificate_args
-        .get_verified_hkds("secret")?
-        .into_iter()
-        .for_each(|k| asrcb.add_hostkey(HostKey::V1(k)));
-
-    debug!("Added all host-keys");
 
     // build + encrypt the request
     let rq =
@@ -168,9 +198,21 @@ fn build_asrcb(opt: &CreateSecretOpt) -> Result<AddSecretRequest> {
     debug!("FLAGS: {flags:x?}");
 
     let mut se_hdr = open_file(&opt.hdr)?;
-    let (tags, _) = BootHdrTags::from_se_image(&mut se_hdr)
+    let (boot_tags, _) = BootHdrTags::from_se_image(&mut se_hdr)
         .with_context(|| format!("Provided SE-header in '{}' is malformed", &opt.hdr))?;
-    let mut asrcb = AddSecretRequest::new(AddSecretVersion::One, secret, tags, flags);
+
+    let hkds = opt.certificate_args.get_verified_hkds_new(
+        "secret",
+        SecretVersionSelection::Explicit(opt.secret_version).map(|v| v.into()),
+    )?;
+    let secret_version =
+        determine_version(SecretVersionSelection::Explicit(opt.secret_version), &hkds);
+
+    let mut asrcb = AddSecretRequest::new(secret_version, secret, boot_tags, flags)?;
+
+    hkds.into_iter().for_each(|k| asrcb.add_hostkey(k));
+
+    debug!("Added all host-keys");
 
     // Set CUID
     read_cuid(&mut asrcb, opt)?;

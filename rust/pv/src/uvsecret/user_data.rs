@@ -10,7 +10,7 @@ use crate::crypto::{sign_msg, verify_signature};
 use crate::req::BinReqValues;
 use crate::request::openssl::pkey::{HasParams, HasPublic, Id, PKey, PKeyRef, Private, Public};
 use crate::request::RequestMagic;
-use crate::secret::{AddSecretMagic, AddSecretRequest, AddSecretVersion, UserDataType};
+use crate::secret::{AddSecretMagic, AddSecretRequest, UserDataType};
 use crate::{assert_size, Error, Result};
 
 /// User data.
@@ -261,21 +261,19 @@ pub fn verify_asrcb_and_get_user_data(
     // check that the provided buffer contains an Add Secret request
     let magic = AddSecretMagic::try_from_bytes(&asrcb)?;
     let req = BinReqValues::get(&asrcb)?;
-    if req.version() != AddSecretVersion::One as u32 {
-        return Err(Error::BinAsrcbInvVersion);
-    }
 
     // preventing the two lines after the truncate from panicking
     let req_len = req.len();
     if asrcb.len() < req_len
-        || req_len < AddSecretRequest::V1_USER_DATA_OFFS + UserData::USER_DATA_SIZE
+        || req_len < AddSecretRequest::USER_DATA_OFFS + UserData::USER_DATA_SIZE
     {
         return Err(pv_core::Error::NoAsrcb.into());
     }
+
     // forget the tag (and all additional data that might be behind the tag)
     asrcb.truncate(req_len - BinReqValues::TAG_LEN);
     // get a mutable refrenence on the 512 bytes of user data
-    let (_, user_data) = asrcb.split_at_mut(AddSecretRequest::V1_USER_DATA_OFFS);
+    let (_, user_data) = asrcb.split_at_mut(AddSecretRequest::USER_DATA_OFFS);
     let user_data = &mut user_data[..UserData::USER_DATA_SIZE];
 
     // depending on the user_data_type do:
