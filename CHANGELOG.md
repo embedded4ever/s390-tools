@@ -1,15 +1,37 @@
 Release history for s390-tools (MIT version)
 --------------------------------------------
 
-* __v2.xx.x (20xx-xx-xx)__
+* __v2.43.1 (2026-07-22)__
 
-  For Linux kernel version: 7.x
-
-  Add new tools / libraries:
+  For Linux kernel version: 7.1
 
   Changes of existing tools:
+  - dasdfmt: Check disk type before prompting for blocksize
+  - iucvterm/ts-shell: Introduce config parameter to specify iucvconn binary
+  - iucvterm/ts-shell: Introduce pager config to replace env variable
+  - pv: Add root CA organization pinning to certificate verification
+  - zdump/ngdump: Use OpenSSL's SHA256 to compute digest of dump image
 
   Bug Fixes:
+  - 95sel-ebc: Add udev-settle dependency
+  - 95sel-ebc: Add umount to boot service
+  - 95sel-ebc: Harden boot mount service
+  - fdasd: Fix memory leak in yes_no() function
+  - iucvterm/iucvtty: Ensure PTY and server fd's are closed at exec
+  - iucvterm/iucvtty: Prevent connection stalls when receiving TERM env
+  - iucvterm/iucvtty: Validate TERM environment name
+  - libkmipclient: Protect from symlink-following attacks
+  - libkmipclient: Various bugfixes
+  - libseckey: Protect from symlink-following attacks
+  - libseckey: Various bugfixes
+  - mon_procd: Fix possible static buffer overflow
+  - osasnmpd: Fix SNMP non-compliance
+  - zdev: Harden against invalid udev, import, firmware, or hypervisor data
+  - zipl-editenv: Check in-bootmap environment block validity
+  - zipl/boot: Check in-bootmap environment block syntax
+  - zipl: Check keyword duplications in BLS entries
+  - zipl: Fix bugs in mirror support
+  - zkey: Protect from symlink-following attacks
 
 * __v2.43.0 (2026-06-25)__
 
