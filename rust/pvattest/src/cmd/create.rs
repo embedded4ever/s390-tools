@@ -62,11 +62,12 @@ fn determine_version(
 }
 
 pub fn create(opt: &CreateAttOpt) -> Result<ExitCode> {
-    let hkds = opt
-        .certificate_args
-        .get_verified_hkds_new("attestation request", opt.att_version.map(|v| v.into()))?;
+    let hkds = opt.certificate_args.get_verified_hkds_new(
+        "attestation request",
+        AttVersionSelection::Explicit(opt.att_version).map(|v| v.into()),
+    )?;
 
-    let att_version = determine_version(opt.att_version, &hkds);
+    let att_version = determine_version(AttVersionSelection::Explicit(opt.att_version), &hkds);
     let meas_alg = AttestationMeasAlg::HmacSha512;
 
     let mut arcb = AttestationRequest::new(att_version, meas_alg, flags(&opt.add_data))?;

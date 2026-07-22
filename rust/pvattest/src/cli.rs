@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum, ValueHint};
 use utils::{
-    AutoOrExplicit, AutoOrExplicitParser, CertificateOptions, DeprecatedVerbosityOptions,
-    HkdVersion, ValueEnumDisplay, ValueEnumFromStr,
+    AutoOrExplicit, CertificateOptions, DeprecatedVerbosityOptions, HkdVersion, ValueEnumDisplay,
+    ValueEnumFromStr,
 };
 
 /// create, perform, and verify attestation measurements
@@ -82,7 +82,6 @@ pub enum AttVersion {
 }
 
 pub type AttVersionSelection = AutoOrExplicit<AttVersion>;
-pub type AttVersionSelectionParser = AutoOrExplicitParser<AttVersion>;
 
 impl From<AttVersion> for HkdVersion {
     fn from(val: AttVersion) -> Self {
@@ -122,8 +121,8 @@ pub struct CreateAttOpt {
     pub add_data: Vec<AttAddFlags>,
 
     /// Specify the Attestation Request version to use.
-    #[arg(long = "att-version", value_name = "VERSION", default_value_t = AttVersionSelection::Explicit(AttVersion::V1), value_parser = AttVersionSelectionParser::default())]
-    pub att_version: AttVersionSelection,
+    #[arg(long = "att-version", value_name = "VERSION", default_value_t = AttVersion::V1)]
+    pub att_version: AttVersion,
 }
 
 #[derive(Debug, ValueEnum, Clone, Copy)]

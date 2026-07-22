@@ -6,10 +6,9 @@ use std::fmt::Display;
 use std::path::Path;
 
 use anyhow::Result;
-use log::{debug, info};
+use log::{debug, info, warn};
 use pv::misc::{read_certs, read_file};
-use pv::request::openssl::DigestBytes;
-use pv::request::EcPubKeyCoord;
+use pv::request::{EcPubKeyCoord, HybridPKey, KeyslotV2};
 use serde::Serialize;
 use utils::HexSlice;
 
@@ -36,7 +35,7 @@ impl Display for HkCheck {
     }
 }
 
-fn load_host_keys<A: AsRef<Path>>(hkds: &[A]) -> Result<Vec<(&Path, DigestBytes)>> {
+fn load_host_keys<A: AsRef<Path>>(hkds: &[A]) -> Result<Vec<(&Path, Vec<u8>)>> {
     let mut hkd_hash = Vec::with_capacity(hkds.len());
     for hkd in hkds {
         let hkd = hkd.as_ref();
@@ -45,21 +44,41 @@ fn load_host_keys<A: AsRef<Path>>(hkds: &[A]) -> Result<Vec<(&Path, DigestBytes)
             hkd: hkd.display().to_string(),
             source,
         })?;
-        let ec_coord: EcPubKeyCoord = certs.first().unwrap().public_key()?.as_ref().try_into()?;
-        hkd_hash.push((hkd, ec_coord.sha256()?));
+
+        let ec_key = certs.first().unwrap().public_key()?;
+
+        match certs.len() {
+            1 => {
+                let ec_coord: EcPubKeyCoord = ec_key.as_ref().try_into()?;
+                hkd_hash.push((hkd, ec_coord.sha256()?.as_ref().to_vec()));
+            }
+            2 => {
+                let mlkem_key = certs[1].public_key()?;
+                let ks = KeyslotV2::new(HybridPKey::new(ec_key, mlkem_key)?);
+                let hash = ks.sha512()?;
+                hkd_hash.push((hkd, hash[..32].to_vec()));
+            }
+            _ => {
+                warn!(
+                    "The host-key document in '{}' contains more than two certificates!",
+                    hkd.display()
+                );
+                Err(pv::Error::WrongNumberOfKeys(hkd.display().to_string()))?;
+            }
+        }
     }
     Ok(hkd_hash)
 }
 
 fn contains_phkh<'a>(
-    hkd_hashes: &[(&'a Path, DigestBytes)],
+    hkd_hashes: &[(&'a Path, Vec<u8>)],
     phkh: &HexSlice<'_>,
     mode: HkCheck,
     check_enforced: bool,
 ) -> CheckState<HostKeyCheck<'a>> {
     let hk: Vec<_> = hkd_hashes
         .iter()
-        .filter_map(|(path, hash)| match hash.as_ref() == phkh.as_ref() {
+        .filter_map(|(path, hash)| match hash == phkh.as_ref() {
             true => Some(*path),
             false => None,
         })

@@ -4,7 +4,7 @@
 
 //! IBM Z Host key-slot implementations.
 
-use openssl::hash::MessageDigest;
+use openssl::hash::{DigestBytes, MessageDigest};
 use openssl::pkey::{PKey, PKeyRef, Private, Public};
 
 use crate::crypto::{derive_aes256_gcm_key, derive_aes256_gcm_key_hybrid, encrypt_aead, hash};
@@ -101,6 +101,19 @@ impl KeyslotV2 {
         }
     }
 
+    /// calculates the sha512 of this hybrid key
+    pub fn sha512(&self) -> Result<DigestBytes> {
+        let mut phk_buf = Vec::<u8>::with_capacity(160 + 1568);
+        let ec_phk: EcPubKeyCoord = self.ec_hostkey.as_ref().try_into()?;
+        phk_buf.extend_from_slice(ec_phk.as_ref());
+        phk_buf.extend_from_slice(&self.mlkem_hostkey.raw_public_key()?);
+        assert_eq!(phk_buf.len(), 160 + 1568);
+
+        let hash = hash(MessageDigest::sha512(), &phk_buf)?;
+        assert_eq!(hash.len(), 64);
+        Ok(hash)
+    }
+
     /// Encrypts `secret` using `self` and `priv_key` the encryption.
     ///
     /// # Returns
@@ -132,12 +145,6 @@ impl KeyslotV2 {
         priv_key: &PKeyRef<Private>,
         to: &mut Vec<u8>,
     ) -> Result<()> {
-        let mut phk_buf = Vec::<u8>::with_capacity(160 + 1568);
-        let ec_phk: EcPubKeyCoord = self.ec_hostkey.as_ref().try_into()?;
-        phk_buf.extend_from_slice(ec_phk.as_ref());
-        phk_buf.extend_from_slice(&self.mlkem_hostkey.raw_public_key()?);
-        assert_eq!(phk_buf.len(), 160 + 1568);
-
         let (derived_key, ciphertext) =
             derive_aes256_gcm_key_hybrid(priv_key, &self.ec_hostkey, &self.mlkem_hostkey)?;
         let mut wrpk_and_kst =
@@ -145,7 +152,7 @@ impl KeyslotV2 {
         assert_eq!(wrpk_and_kst.len(), 48);
 
         to.reserve(1680);
-        let hash = hash(MessageDigest::sha512(), &phk_buf)?;
+        let hash = self.sha512()?;
         assert_eq!(hash.len(), 64);
         to.extend_from_slice(&hash);
         to.append(&mut wrpk_and_kst);
