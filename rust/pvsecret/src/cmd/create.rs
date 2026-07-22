@@ -210,7 +210,9 @@ fn build_asrcb(opt: &CreateSecretOpt) -> Result<AddSecretRequest> {
 
     let mut asrcb = AddSecretRequest::new(secret_version, secret, boot_tags, flags)?;
 
-    hkds.into_iter().for_each(|k| asrcb.add_hostkey(k));
+    for k in hkds.into_iter() {
+        asrcb.add_hostkey(k)?
+    }
 
     debug!("Added all host-keys");
 

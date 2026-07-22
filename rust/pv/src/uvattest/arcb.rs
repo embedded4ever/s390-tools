@@ -61,9 +61,9 @@ use crate::{
 /// let hkd = s390_pv::misc::read_certs(&std::fs::read("host-key-document.crt")?)?;
 /// // IBM issued HKD certificates typically have one X509
 /// let hkd = hkd.first().unwrap().public_key()?;
-/// arcb.add_hostkey(HostKey::V1(hkd));
+/// arcb.add_hostkey(HostKey::V1(hkd))?;
 /// // you can add multiple hostkeys
-/// // arcb.add_hostkey(HostKey::V1(another_hkd));
+/// // arcb.add_hostkey(HostKey::V1(another_hkd))?;
 /// // encrypt it
 /// let ctx = ReqEncrCtx::random(SymKeyType::Aes256Gcm)?;
 /// let arcb = arcb.encrypt(&ctx)?;
@@ -243,8 +243,19 @@ impl Request for AttestationRequest {
         ctx.encrypt_aead(&aad, conf).map(|res| res.into_buf())
     }
 
-    fn add_hostkey(&mut self, hostkey: HostKey) {
-        self.keyslots.push(Keyslot::new(hostkey))
+    fn add_hostkey(&mut self, hostkey: HostKey) -> Result<()> {
+        match self.version {
+            AttestationVersion::One if !hostkey.is_hybrid() => Ok(()),
+            AttestationVersion::Two if hostkey.is_hybrid() => Ok(()),
+            AttestationVersion::One => Err(Error::InvalidHkd(
+                "Add classical hostkey to a v1 attestation request".to_string(),
+            )),
+            AttestationVersion::Two => Err(Error::InvalidHkd(
+                "Add hybrid key to a v2 attetstation request".to_string(),
+            )),
+        }?;
+        self.keyslots.push(Keyslot::new(hostkey));
+        Ok(())
     }
 }
 
@@ -457,7 +468,7 @@ mod test {
         arcb.conf.value_mut().nonce = NONCE;
         arcb.conf.value_mut().meas_key = MEAS;
 
-        arcb.add_hostkey(host_key);
+        arcb.add_hostkey(host_key).unwrap();
         arcb.encrypt(&ctx).unwrap()
     }
 
@@ -487,7 +498,7 @@ mod test {
         arcb.conf.value_mut().nonce = NONCE;
         arcb.conf.value_mut().meas_key = MEAS;
 
-        arcb.add_hostkey(host_key);
+        arcb.add_hostkey(host_key).unwrap();
         arcb.encrypt(&ctx).unwrap()
     }
 
@@ -584,7 +595,8 @@ mod test {
         )
         .unwrap();
         let (_, host_key1, host_key2) = get_test_keys_hybrid();
-        arcb.add_hostkey(HostKey::V2(HybridPKey::new(host_key1, host_key2).unwrap()));
+        arcb.add_hostkey(HostKey::V2(HybridPKey::new(host_key1, host_key2).unwrap()))
+            .unwrap();
 
         assert_eq!(arcb.version(), AttestationVersion::Two);
     }

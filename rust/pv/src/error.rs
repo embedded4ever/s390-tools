@@ -144,6 +144,9 @@ pub enum Error {
 
     #[error("{}", .0)]
     InvalidHkd(String),
+
+    #[error("All host keys must use the same version (all hybrid or all non-hybrid)")]
+    MixedHostkeyVersions,
 }
 
 // used in macros

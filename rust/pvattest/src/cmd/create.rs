@@ -74,7 +74,9 @@ pub fn create(opt: &CreateAttOpt) -> Result<ExitCode> {
     debug!("Generated Attestation request");
 
     // Add host-key documents
-    hkds.into_iter().for_each(|k| arcb.add_hostkey(k));
+    for k in hkds.into_iter() {
+        arcb.add_hostkey(k)?
+    }
     debug!("Added all host-keys");
 
     let encr_ctx =

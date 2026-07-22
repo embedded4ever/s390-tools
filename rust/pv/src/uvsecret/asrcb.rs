@@ -511,7 +511,20 @@ impl Request for AddSecretRequest {
         }
     }
 
-    fn add_hostkey(&mut self, hostkey: HostKey) {
-        self.keyslots.push(Keyslot::new(hostkey))
+    fn add_hostkey(&mut self, hostkey: HostKey) -> Result<()> {
+        match self.version {
+            AddSecretVersion::One if !hostkey.is_hybrid() => Ok(()),
+            AddSecretVersion::Two if hostkey.is_hybrid() => Ok(()),
+            AddSecretVersion::One => Err(Error::InvalidHkd(
+                "Add classical hostkey to a v1 attestation request".to_string(),
+            )),
+            AddSecretVersion::Two => Err(Error::InvalidHkd(
+                "Add hybrid key to a v2 attetstation request".to_string(),
+            )),
+            #[cfg(any(debug_assertions, test))]
+            AddSecretVersion::Inv => panic!("Invalid version for production use"),
+        }?;
+        self.keyslots.push(Keyslot::new(hostkey));
+        Ok(())
     }
 }

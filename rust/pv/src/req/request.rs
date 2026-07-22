@@ -51,7 +51,7 @@ pub trait Request {
     /// Add a host-key to this request
     ///
     /// Must be called at least once, otherwise {`Request::encrypt`} will fail
-    fn add_hostkey(&mut self, hostkey: HostKey);
+    fn add_hostkey(&mut self, hostkey: HostKey) -> Result<()>;
 }
 
 /// A struct to represent some parts of a binary/encrypted request.

@@ -327,6 +327,15 @@ impl<W: Write + Seek> SeImgBuilder<W> {
             None => return Err(Error::NoHostkey.into()),
         };
 
+        // Verify all hostkeys have the same version -> test if all or none are hybrid
+        let hybrid = matches!(version, SeHdrVersion::V2);
+        sehdr_args
+            .keys
+            .iter()
+            .all(|k| k.is_hybrid() == hybrid)
+            .then_some(())
+            .ok_or(pv::Error::MixedHostkeyVersions)?;
+
         let mut se_hdr_builder = SeHdrBuilder::new(
             version,
             PSW {

@@ -43,7 +43,7 @@ fn create_asrcb(
         asrcb.set_cuid(c);
     };
 
-    asrcb.add_hostkey(hkd);
+    asrcb.add_hostkey(hkd)?;
     asrcb.encrypt(ctx)
 }
 
@@ -128,7 +128,7 @@ fn create_signed_asrcb(skey: PKey<Private>, user_data: Vec<u8>) -> Vec<u8> {
         AddSecretRequest::new(AddSecretVersion::One, GuestSecret::Null, TAGS, no_flag())
             .expect("AddSecretRequest::new failed");
 
-    asrcb.add_hostkey(host_key);
+    asrcb.add_hostkey(host_key).unwrap();
     asrcb.set_user_data(user_data, Some(skey)).unwrap();
     asrcb.encrypt(&ctx).unwrap()
 }
@@ -139,7 +139,7 @@ fn create_signed_asrcb_v2(skey: PKey<Private>, user_data: Vec<u8>) -> Vec<u8> {
         AddSecretRequest::new(AddSecretVersion::Two, GuestSecret::Null, TAGS, no_flag())
             .expect("AddSecretRequest::new failed");
 
-    asrcb.add_hostkey(host_key);
+    asrcb.add_hostkey(host_key).unwrap();
     asrcb.set_user_data(user_data, Some(skey)).unwrap();
     asrcb.encrypt(&ctx).unwrap()
 }
@@ -152,7 +152,7 @@ fn null_none_default_ncuid_one_user_unsgn() {
         AddSecretRequest::new(AddSecretVersion::One, GuestSecret::Null, TAGS, no_flag())
             .expect("AddSecretRequest::new failed");
 
-    asrcb.add_hostkey(host_key);
+    asrcb.add_hostkey(host_key).unwrap();
     asrcb.set_user_data(user_data_orig.clone(), None).unwrap();
     let asrcb = asrcb.encrypt(&ctx).unwrap();
 
@@ -287,7 +287,9 @@ fn null_none_default_cuid_seven() {
     let mut asrcb =
         AddSecretRequest::new(AddSecretVersion::One, GuestSecret::Null, TAGS, no_flag())
             .expect("AddSecretRequest::new failed");
-    (0..7).for_each(|_| asrcb.add_hostkey(hkd.clone()));
+    for _ in 0..7 {
+        asrcb.add_hostkey(hkd.clone()).unwrap()
+    }
     asrcb.set_cuid(CUID);
     let asrcb = asrcb.encrypt(&ctx).unwrap();
 
