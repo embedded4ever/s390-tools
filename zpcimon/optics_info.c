@@ -53,7 +53,7 @@ enum optics_type optics_type(struct optics *oi)
 	};
 }
 
-bool optics_los_implemented(struct optics *oi)
+static bool optics_los_implemented(struct optics *oi)
 {
 	enum optics_type type = optics_type(oi);
 	uint8_t implemented;
