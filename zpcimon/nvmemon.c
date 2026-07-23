@@ -20,6 +20,7 @@
 #include "lib/pci_list.h"
 #include "lib/pci_sclp.h"
 #include "lib/util_fmt.h"
+#include "lib/zt_common.h"
 
 #include "nvmemon.h"
 #include "zpcimon.h"
@@ -108,19 +109,24 @@ static void nvme_json_print_smart_log(struct zpcimon_ctx *ctx, struct nvme_smart
 	util_fmt_pair(FMT_DEFAULT, "media_errors", "%s", u128_num_buf);
 	nvme_u128_to_json_val(nvme_le128_to_cpu(log->num_err_log_entries), u128_num_buf);
 	util_fmt_pair(FMT_DEFAULT, "num_err_log_entries", "%s", u128_num_buf);
-	util_fmt_pair(FMT_DEFAULT, "warning_temp_time", "%d", le32toh(log->warning_temp_time));
-	util_fmt_pair(FMT_DEFAULT, "critical_comp_time", "%d", le32toh(log->critical_comp_time));
-	util_fmt_pair(FMT_DEFAULT, "temperature_sensor_1", "%d", le16toh(log->temp_sensor[0]));
-	util_fmt_pair(FMT_DEFAULT, "temperature_sensor_2", "%d", le16toh(log->temp_sensor[1]));
-	util_fmt_pair(FMT_DEFAULT, "temperature_sensor_3", "%d", le16toh(log->temp_sensor[2]));
+	util_fmt_pair(FMT_DEFAULT, "warning_temp_time", "%d",
+		      le32toh((__force uint32_t)log->warning_temp_time));
+	util_fmt_pair(FMT_DEFAULT, "critical_comp_time", "%d",
+		      le32toh((__force uint32_t)log->critical_comp_time));
+	util_fmt_pair(FMT_DEFAULT, "temperature_sensor_1", "%d",
+		      le16toh((__force uint16_t)log->temp_sensor[0]));
+	util_fmt_pair(FMT_DEFAULT, "temperature_sensor_2", "%d",
+		      le16toh((__force uint16_t)log->temp_sensor[1]));
+	util_fmt_pair(FMT_DEFAULT, "temperature_sensor_3", "%d",
+		      le16toh((__force uint16_t)log->temp_sensor[2]));
 	util_fmt_pair(FMT_DEFAULT, "thm_temp1_trans_count", "%d",
-		      le32toh(log->thm_temp1_trans_count));
+		      le32toh((__force uint32_t)log->thm_temp1_trans_count));
 	util_fmt_pair(FMT_DEFAULT, "thm_temp2_trans_count", "%d",
-		      le32toh(log->thm_temp2_trans_count));
+		      le32toh((__force uint32_t)log->thm_temp2_trans_count));
 	util_fmt_pair(FMT_DEFAULT, "thm_temp1_total_time", "%d",
-		      le32toh(log->thm_temp1_total_time));
+		      le32toh((__force uint32_t)log->thm_temp1_total_time));
 	util_fmt_pair(FMT_DEFAULT, "thm_temp2_total_time", "%d",
-		      le32toh(log->thm_temp2_total_time));
+		      le32toh((__force uint32_t)log->thm_temp2_total_time));
 	util_fmt_obj_end(); /* smart-log */
 
 	if (ctx->opts.smart_blob)
