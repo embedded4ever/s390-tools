@@ -313,7 +313,7 @@ fn determine_version(cli_version: HdrVersionSelection, host_keys: &[HostKey]) ->
 pub fn create(opt: &CreateBootImageArgs) -> Result<OwnExitCode> {
     // Verify host key documents first, because if they are not valid there is
     // no reason to continue.
-    let verified_host_keys = opt.certificate_args.get_verified_hkds_new(
+    let verified_host_keys = opt.certificate_args.get_verified_hkds(
         "Secure Execution image",
         HdrVersionSelection::Explicit(opt.hdr_version).map(|v| v.into()),
     )?;

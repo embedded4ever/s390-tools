@@ -16,7 +16,7 @@ fn main() -> Result<()> {
     LOGGER.start(LevelFilter::Trace)?;
     let opt = cli::CliOptions::parse();
     opt.certificate_args
-        .get_verified_hkds_new("info", opt.hkd_version.map(|v| v.into()))?;
+        .get_verified_hkds("info", opt.hkd_version.map(|v| v.into()))?;
     info!("Host-key documents verified.");
     Ok(())
 }

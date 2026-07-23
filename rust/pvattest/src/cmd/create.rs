@@ -62,7 +62,7 @@ fn determine_version(
 }
 
 pub fn create(opt: &CreateAttOpt) -> Result<ExitCode> {
-    let hkds = opt.certificate_args.get_verified_hkds_new(
+    let hkds = opt.certificate_args.get_verified_hkds(
         "attestation request",
         AttVersionSelection::Explicit(opt.att_version).map(|v| v.into()),
     )?;

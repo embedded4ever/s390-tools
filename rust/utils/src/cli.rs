@@ -13,7 +13,7 @@ use clap::{Arg, ArgAction, ArgGroup, Args, Command, ValueEnum, ValueHint};
 use log::{info, warn, LevelFilter};
 use openssl::Nid;
 use pv::misc::{create_file, open_file, read_certs, read_file};
-use pv::request::openssl::pkey::{KeyType, PKey, PKeyRef, Public};
+use pv::request::openssl::pkey::{KeyType, PKeyRef, Public};
 use pv::request::{openssl, HkdVerifier, HostKey, HybridPKey};
 use pv::{Error, Result};
 use utils_macros::{ValueEnumDisplay, ValueEnumFromStr};
@@ -239,44 +239,6 @@ impl CertificateOptions {
         }
     }
 
-    /// Read the host-keys specified and verifies them if required
-    ///
-    /// - `protectee`: what you want to create. e.g. add-secret request or SE-image
-    ///
-    /// # Error
-    /// Returns an error if something went wrong during parsing the HKDs, the verification chain
-    /// could not built, or when the verification
-    /// failed.
-    pub fn get_verified_hkds(&self, protectee: &'static str) -> Result<Vec<PKey<Public>>> {
-        let hkds = &self.host_key_documents;
-        let verifier = self.verifier(protectee)?;
-
-        let mut res = Vec::with_capacity(hkds.len());
-        for hkd in hkds {
-            let hk = read_file(hkd, "host-key document")?;
-            let certs = read_certs(&hk).map_err(|source| Error::HkdNotPemOrDer {
-                hkd: hkd.display().to_string(),
-                source,
-            })?;
-            if certs.is_empty() {
-                return Err(Error::NoHkdInFile(hkd.display().to_string()));
-            }
-            if certs.len() != 1 {
-                warn!(
-                    "The host-key document in '{}' contains more than one certificate!",
-                    hkd.display()
-                )
-            }
-
-            // Panic: len is == 1 -> unwrap will succeed/not panic
-            let c = certs.first().unwrap();
-            verifier.verify(c)?;
-            res.push(c.public_key()?);
-            info!("Use host-key document at '{}'", hkd.display());
-        }
-        Ok(res)
-    }
-
     fn is_ec_p521_key(key: &PKeyRef<Public>) -> bool {
         if key.id() == openssl::pkey::Id::EC {
             let ec_key = key.ec_key().unwrap();
@@ -301,7 +263,7 @@ impl CertificateOptions {
     /// Returns an error if something went wrong during parsing the HKDs, the verification chain
     /// could not built, or when the verification
     /// failed.
-    pub fn get_verified_hkds_new(
+    pub fn get_verified_hkds(
         &self,
         protectee: &'static str,
         requested_version: HkdVersionSelection,

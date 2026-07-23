@@ -201,7 +201,7 @@ fn build_asrcb(opt: &CreateSecretOpt) -> Result<AddSecretRequest> {
     let (boot_tags, _) = BootHdrTags::from_se_image(&mut se_hdr)
         .with_context(|| format!("Provided SE-header in '{}' is malformed", &opt.hdr))?;
 
-    let hkds = opt.certificate_args.get_verified_hkds_new(
+    let hkds = opt.certificate_args.get_verified_hkds(
         "secret",
         SecretVersionSelection::Explicit(opt.secret_version).map(|v| v.into()),
     )?;
