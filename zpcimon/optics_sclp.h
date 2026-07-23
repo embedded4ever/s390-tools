@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "lib/pci_list.h"
+#include "lib/zt_common.h"
 
 #include "optics_info.h"
 
