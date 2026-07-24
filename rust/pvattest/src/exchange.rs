@@ -623,9 +623,12 @@ mod test {
         measurement: usize,
         additional: usize,
     ) {
-        // TODO as 32 checks
-        let ctx_write = ExchangeFormatRequest::new(arcb, measurement as u32, additional as u32)
-            .expect("exchange fmt creation");
+        let ctx_write = ExchangeFormatRequest::new(
+            arcb,
+            measurement.try_into().unwrap(),
+            additional.try_into().unwrap(),
+        )
+        .expect("exchange fmt creation");
 
         // let mut out = create_file(path).unwrap();
         let mut out = vec![];
