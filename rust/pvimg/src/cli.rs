@@ -823,6 +823,62 @@ mod test {
         map
     }
 
+    // Helper to test valid args - generic over parse and convert functions
+    fn test_valid_args<F>(args_list: Vec<Vec<&str>>, parse_and_convert: F, name: &str)
+    where
+        F: Fn(&[&str]) -> Result<CliOptions, clap::Error>,
+    {
+        for arg in args_list {
+            let res = parse_and_convert(&arg);
+            #[allow(clippy::use_debug, clippy::print_stdout)]
+            if let Err(e) = &res {
+                println!("{name} arg: {arg:?}");
+                println!("{e}");
+            }
+            assert!(res.is_ok(), "{name} failed for: {arg:?}");
+        }
+    }
+
+    // Helper to test invalid args - expects parse or validation to fail
+    fn test_invalid_args<F>(
+        test_cases: &[(&[Vec<String>], clap::error::ErrorKind, &str)],
+        cmd_prefix: &[&str],
+        parse_and_convert: F,
+        name: &str,
+    ) where
+        F: Fn(&[&str]) -> Result<CliOptions, clap::Error>,
+    {
+        for (test_group, expected_kind, kind_name) in test_cases {
+            for args in *test_group {
+                let full_args = [
+                    cmd_prefix.to_vec(),
+                    Vec::from_iter(args.iter().map(String::as_str)),
+                ]
+                .concat();
+
+                // Try parse and convert
+                let parse_result = parse_and_convert(&full_args);
+
+                let err = match parse_result {
+                    Ok(cli_opts) => {
+                        // Parse succeeded, validation must fail
+                        validate_cli(&cli_opts).expect_err(&format!(
+                            "{name}: Expected error ({kind_name}) but both parse and validation succeeded for: {full_args:?}"
+                        ))
+                    }
+                    Err(e) => e, // Parse failed as expected
+                };
+
+                assert_eq!(
+                    err.kind(),
+                    *expected_kind,
+                    "{name}: Expected {kind_name} but got {:?} for args: {full_args:?}\nError: {err}",
+                    err.kind()
+                );
+            }
+        }
+    }
+
     #[test]
     #[rustfmt::skip]
     fn genprotimg_and_pvimg_create_args() {
@@ -916,6 +972,13 @@ mod test {
                 CliOption::new("flags", ["--flags", &SeHdrFlagName::ConfidentialDump.to_string()]),
                 CliOption::new("cck", ["--cck", "/dev/null"])
             ])),
+
+            // Test with --overwrite
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("overwrite", ["--overwrite"])])),
+
+            // Test with --no-component-check
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("no-component-check", ["--no-component-check"])])),
+
             // Test with all PCKMO flags
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("flags", ["--flags", &format!("{},{},{},{}",
                                                                                                     SeHdrFlagName::PckmoDeaTdea, SeHdrFlagName::PckmoAes, SeHdrFlagName::PckmoEcc, SeHdrFlagName::PckmoHmac)])])),
@@ -923,14 +986,25 @@ mod test {
             // Test with NoComponentEncryption flag
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("flags", ["--flags", &SeHdrFlagName::NoComponentEncryption.to_string()])])),
         ];
-        let invalid_create_args = [
+        // Invalid test cases grouped by expected error kind
+        let invalid_missing_required = [
             flat_map_collect(remove(mvcanv.clone(), "no-verify")),
             flat_map_collect(remove(mvcanv.clone(), "image")),
             flat_map_collect(remove(mvcanv.clone(), "hkd")),
             flat_map_collect(remove(mvcanv, "output")),
             // missing both `--cck' and `--enable-cck-update' (required by --enable-dump)
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("enable-dump", ["--enable-dump"])])),
+            // Test --flags with confidential-dump but missing --cck (equivalent to --enable-dump without --cck)
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("flags", ["--flags", &SeHdrFlagName::ConfidentialDump.to_string()])])),
+            // --enable-cck-extension-secret without cck-available (validation error, semantically missing required)
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("enable-cck-extension-secret", ["--enable-cck-extension-secret"])])),
+        ];
 
+        let invalid_value = [
+            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("x-header-key", ["--hdr-key"]),])),
+        ];
+
+        let invalid_conflict = [
             // -v and -q cannot be combined
             flat_map_collect(insert(mvca.clone(), vec![
                 CliOption::new("verbose", ["-v"]),
@@ -948,7 +1022,6 @@ mod test {
                                                    CliOption::new("disable-pckmo", ["--disable-pckmo"])])),
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("enable-image-encryption", ["--enable-image-encryption"]),
                                                    CliOption::new("disable-image-encryption", ["--disable-image-encryption"])])),
-            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("x-header-key", ["--hdr-key"]),])),
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("extension", ["--enable-cck-extension-secret"]),
                                                    CliOption::new("update", ["--enable-cck-update"])])),
 
@@ -963,9 +1036,6 @@ mod test {
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("disable-image-encryption", ["--disable-image-encryption"]),
                                                        CliOption::new("image-key", ["--image-key", "/dev/null"])])),
 
-            // cck-available group tests: invalid combinations
-            // --enable-cck-extension-secret without cck-available
-            flat_map_collect(insert(mvca.clone(), vec![CliOption::new("enable-cck-extension-secret", ["--enable-cck-extension-secret"])])),
             // --enable-cck-extension-secret with --enable-cck-update and --cck (conflict takes precedence)
             flat_map_collect(insert(mvca.clone(), vec![CliOption::new("enable-cck-extension-secret", ["--enable-cck-extension-secret"]),
                                                        CliOption::new("enable-cck-update", ["--enable-cck-update"]),
@@ -1026,62 +1096,31 @@ mod test {
             vec!["pvimg", "version"],
         ];
 
-        // Test for invalid combinations
-        let mut genprotimg_invalid_args = vec![
-            vec!["genprotimg"],
-        ];
-        let mut pvimg_invalid_args = vec![
-            vec!["pvimg"],
-        ];
-
         // Test that `genprotimg` and `pvimg create` behave equally.
         for create_args in &valid_create_args {
             genprotimg_valid_args.push([["genprotimg"].to_vec(), Vec::from_iter(create_args.iter().map(String::as_str))].concat());
             pvimg_valid_args.push([["pvimg", "create"].to_vec(), Vec::from_iter(create_args.iter().map(String::as_str))].concat());
         }
 
-        for invalid_create_args in &invalid_create_args {
-            genprotimg_invalid_args.push([["genprotimg"].to_vec(), Vec::from_iter(invalid_create_args.iter().map(String::as_str))].concat());
-            pvimg_invalid_args.push([["pvimg", "create"].to_vec(), Vec::from_iter(invalid_create_args.iter().map(String::as_str))].concat());
-        }
+        // Test invalid args with expected error kinds
+        let test_cases = [
+            (&invalid_missing_required[..], clap::error::ErrorKind::MissingRequiredArgument, "MissingRequiredArgument"),
+            (&invalid_value[..], clap::error::ErrorKind::InvalidValue, "InvalidValue"),
+            (&invalid_conflict[..], clap::error::ErrorKind::ArgumentConflict, "ArgumentConflict"),
+        ];
 
-        for arg in pvimg_valid_args {
-            let res = CliOptions::try_parse_from(&arg);
-            #[allow(clippy::use_debug, clippy::print_stdout)]
-            if let Err(e) = &res {
-                println!("arg: {arg:?}");
-                println!("{e}");
-            }
-            assert!(res.is_ok());
-        }
+        // Parse and convert functions for each CLI variant
+        let parse_pvimg = |args: &[&str]| CliOptions::try_parse_from(args);
+        // The into converts Result<GenprotimgCliOptions, Error> into Result<CliOptions, Error>
+        let parse_genprotimg = |args: &[&str]| GenprotimgCliOptions::try_parse_from(args).map(Into::into);
 
-        for arg in pvimg_invalid_args {
-            let res = CliOptions::try_parse_from(&arg);
-            // For some conflict tests, parsing succeeds but validation should fail
-            if let Ok(opts) = res {
-                // This should be caught by validate_cli
-                assert!(validate_cli(&opts).is_err(), "Expected validation to fail for conflicting flags");
-            }
-        }
-
-        for arg in genprotimg_valid_args {
-            let res = GenprotimgCliOptions::try_parse_from(&arg);
-            #[allow(clippy::use_debug, clippy::print_stdout)]
-            if let Err(e) = &res {
-                println!("arg: {arg:?}");
-                println!("{e}");
-            }
-            assert!(res.is_ok());
-        }
-
-        for arg in genprotimg_invalid_args {
-            let res = GenprotimgCliOptions::try_parse_from(&arg);
-            // For conflict tests, parsing succeeds but validation should fail
-            if let Ok(genprotimg_opts) = res {
-                let opts: CliOptions = genprotimg_opts.into();
-                // This should be caught by validate_cli
-                assert!(validate_cli(&opts).is_err(), "Expected validation to fail for conflicting flags");
-            }
+        // Test both CLI variants
+        for (name, valid_args, cmd_prefix, parse_fn) in [
+            ("pvimg", pvimg_valid_args, &["pvimg", "create"] as &[&str], &parse_pvimg as &dyn Fn(&[&str]) -> Result<CliOptions, clap::Error>),
+            ("genprotimg", genprotimg_valid_args, &["genprotimg"] as &[&str], &parse_genprotimg as &dyn Fn(&[&str]) -> Result<CliOptions, clap::Error>),
+        ] {
+            test_valid_args(valid_args, parse_fn, name);
+            test_invalid_args(&test_cases, cmd_prefix, parse_fn, name);
         }
     }
 
@@ -1129,13 +1168,37 @@ mod test {
                     CliOption::new("verbose", ["-VVV"]),
                 ],
             )),
+            // Test with --host-key-document
+            flat_map_collect(insert(
+                args.clone(),
+                vec![
+                    CliOption::new("host-key-document", ["--host-key-document", "/dev/null"]),
+                    CliOption::new("image", ["/dev/null"]),
+                ],
+            )),
+            // Test with multiple --host-key-document (comma-separated)
+            flat_map_collect(insert(
+                args.clone(),
+                vec![
+                    CliOption::new(
+                        "host-key-document",
+                        ["--host-key-document", "/dev/null,/dev/zero"],
+                    ),
+                    CliOption::new("image", ["/dev/null"]),
+                ],
+            )),
         ];
 
-        let invalid_test_args = [
+        // Invalid test cases grouped by expected error kind
+        let invalid_missing_required = [
+            // Missing required test-args group (only image provided, no host-key info)
             flat_map_collect(insert(
                 args.clone(),
                 vec![CliOption::new("image", ["/dev/null"])],
             )),
+        ];
+
+        let invalid_conflict = [
             // the argument '--key-hashes[=<FILE>]' cannot be used with '--host-key-document
             // <FILE>'
             flat_map_collect(insert(
@@ -1146,20 +1209,17 @@ mod test {
                     CliOption::new("image", ["/dev/null"]),
                 ],
             )),
-            flat_map_collect(insert(
-                args,
-                vec![
-                    CliOption::new("host-key-hashes2", ["--key-hashes", "/sys/null"]),
-                    CliOption::new("image", ["--", "/dev/null"]),
-                ],
-            )),
         ];
 
-        let mut pvimg_valid_args = vec![];
+        let invalid_unknown_arg = [flat_map_collect(insert(
+            args.clone(),
+            vec![
+                CliOption::new("host-key-hashes2", ["--key-hashes", "/sys/null"]),
+                CliOption::new("image", ["--", "/dev/null"]),
+            ],
+        ))];
 
-        // Test for invalid combinations
-        // Input is missing
-        let mut pvimg_invalid_args = vec![vec!["pvimg", "test"]];
+        let mut pvimg_valid_args = vec![];
 
         for create_args in &valid_test_args {
             pvimg_valid_args.push(
@@ -1171,30 +1231,36 @@ mod test {
             );
         }
 
-        for invalid_test_arg in &invalid_test_args {
-            pvimg_invalid_args.push(
-                [
-                    ["pvimg", "test"].to_vec(),
-                    Vec::from_iter(invalid_test_arg.iter().map(String::as_str)),
-                ]
-                .concat(),
-            );
-        }
+        let test_cases = [
+            (
+                &invalid_missing_required[..],
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "MissingRequiredArgument",
+            ),
+            (
+                &invalid_conflict[..],
+                clap::error::ErrorKind::ArgumentConflict,
+                "ArgumentConflict",
+            ),
+            (
+                &invalid_unknown_arg[..],
+                clap::error::ErrorKind::UnknownArgument,
+                "UnknownArgument",
+            ),
+        ];
 
-        for arg in pvimg_valid_args {
-            let res = CliOptions::try_parse_from(&arg);
-            #[allow(clippy::use_debug, clippy::print_stdout)]
-            if let Err(e) = &res {
-                println!("arg: {arg:?}");
-                println!("{e}");
-            }
-            assert!(res.is_ok());
-        }
-
-        for arg in pvimg_invalid_args {
-            let res = CliOptions::try_parse_from(&arg);
-            assert!(res.is_err());
-        }
+        let parse_pvimg = |args: &[&str]| CliOptions::try_parse_from(args);
+        test_valid_args(
+            pvimg_valid_args,
+            &parse_pvimg as &dyn Fn(&[&str]) -> Result<CliOptions, clap::Error>,
+            "pvimg test",
+        );
+        test_invalid_args(
+            &test_cases,
+            &["pvimg", "test"],
+            &parse_pvimg as &dyn Fn(&[&str]) -> Result<CliOptions, clap::Error>,
+            "pvimg test",
+        );
     }
 
     #[test]
@@ -1285,9 +1351,27 @@ mod test {
                     ["--print-schema", "json"],
                 )],
             )),
+            // --show-secrets with --hdr-key
+            flat_map_collect(insert(
+                args.clone(),
+                vec![
+                    CliOption::new("hdr-key", ["--hdr-key", "/dev/null"]),
+                    CliOption::new("show-secrets", ["--show-secrets"]),
+                    CliOption::new("image", ["/dev/null"]),
+                ],
+            )),
+            // text:full format
+            flat_map_collect(insert(
+                args.clone(),
+                vec![
+                    CliOption::new("format", ["--format", "text:full"]),
+                    CliOption::new("image", ["/dev/null"]),
+                ],
+            )),
         ];
 
-        let invalid_test_args = [
+        // Invalid test cases grouped by expected error kind
+        let invalid_value = [
             // No default defined for --format
             flat_map_collect(insert(
                 args.clone(),
@@ -1296,6 +1380,9 @@ mod test {
                     CliOption::new("image", ["--", "/dev/null"]),
                 ],
             )),
+        ];
+
+        let invalid_conflict = [
             // --print-json-schema conflicts with input
             flat_map_collect(insert(
                 args.clone(),
@@ -1322,7 +1409,7 @@ mod test {
             )),
             // --print-json-schema conflicts with --show-secrets
             flat_map_collect(insert(
-                args,
+                args.clone(),
                 vec![
                     CliOption::new("print-json-schema", ["--print-schema", "json"]),
                     CliOption::new("show-secrets", ["--show-secrets"]),
@@ -1331,10 +1418,6 @@ mod test {
         ];
 
         let mut pvimg_valid_args = vec![];
-
-        // Test for invalid combinations
-        // Input is missing
-        let mut pvimg_invalid_args = vec![vec!["pvimg", "info"]];
 
         for create_args in &valid_test_args {
             pvimg_valid_args.push(
@@ -1346,30 +1429,120 @@ mod test {
             );
         }
 
-        for invalid_test_arg in &invalid_test_args {
-            pvimg_invalid_args.push(
-                [
-                    ["pvimg", "info"].to_vec(),
-                    Vec::from_iter(invalid_test_arg.iter().map(String::as_str)),
-                ]
-                .concat(),
-            );
-        }
+        let invalid_format = [
+            // Invalid format variant for text
+            flat_map_collect(insert(
+                args.clone(),
+                vec![
+                    CliOption::new("format", ["--format", "text:minify"]),
+                    CliOption::new("image", ["/dev/null"]),
+                ],
+            )),
+            // Invalid format variant for json
+            flat_map_collect(insert(
+                args.clone(),
+                vec![
+                    CliOption::new("format", ["--format", "json:full"]),
+                    CliOption::new("image", ["/dev/null"]),
+                ],
+            )),
+        ];
 
-        for arg in pvimg_valid_args {
-            let res = CliOptions::try_parse_from(&arg);
-            #[allow(clippy::use_debug, clippy::print_stdout)]
-            if let Err(e) = &res {
-                println!("arg: {arg:?}");
-                println!("{e}");
-            }
-            assert!(res.is_ok());
-        }
+        let test_cases = [
+            (
+                &invalid_value[..],
+                clap::error::ErrorKind::InvalidValue,
+                "InvalidValue",
+            ),
+            (
+                &invalid_conflict[..],
+                clap::error::ErrorKind::ArgumentConflict,
+                "ArgumentConflict",
+            ),
+            (
+                &invalid_format[..],
+                clap::error::ErrorKind::ValueValidation,
+                "ValueValidation",
+            ),
+        ];
 
-        for arg in pvimg_invalid_args {
-            let res = CliOptions::try_parse_from(&arg);
-            assert!(res.is_err());
-        }
+        let parse_pvimg = |args: &[&str]| CliOptions::try_parse_from(args);
+        test_valid_args(
+            pvimg_valid_args,
+            &parse_pvimg as &dyn Fn(&[&str]) -> Result<CliOptions, clap::Error>,
+            "pvimg info",
+        );
+        test_invalid_args(
+            &test_cases,
+            &["pvimg", "info"],
+            &parse_pvimg as &dyn Fn(&[&str]) -> Result<CliOptions, clap::Error>,
+            "pvimg info",
+        );
+    }
+
+    #[test]
+    fn test_output_format_kind_display() {
+        assert_eq!(OutputFormatKind::Text.to_string(), "human-readable");
+        assert_eq!(OutputFormatKind::Json.to_string(), "JSON");
+    }
+
+    #[test]
+    fn test_output_format_kind_from_str() {
+        assert_eq!(
+            "text".parse::<OutputFormatKind>().unwrap(),
+            OutputFormatKind::Text
+        );
+        assert_eq!(
+            "json".parse::<OutputFormatKind>().unwrap(),
+            OutputFormatKind::Json
+        );
+        assert!("invalid".parse::<OutputFormatKind>().is_err());
+    }
+
+    #[test]
+    fn test_new_version_cmd_opts() {
+        let opts = CliOptions::new_version_cmd_opts();
+        assert!(opts.version);
+        assert!(matches!(opts.cmd, SubCommands::Version));
+    }
+
+    #[test]
+    fn test_genprotimg_to_cli_options_conversion() {
+        let genprotimg_opts = GenprotimgCliOptions {
+            args: Box::new(CreateBootImageArgs::default()),
+            verbose: DeprecatedVerbosityOptions::default(),
+            version: (),
+            help_all: (),
+            help_experimental: (),
+        };
+        let cli_opts: CliOptions = genprotimg_opts.into();
+        assert!(!cli_opts.version);
+        assert!(matches!(cli_opts.cmd, SubCommands::Create(_)));
+    }
+
+    #[test]
+    fn test_se_hdr_flag_name_display() {
+        assert_eq!(
+            SeHdrFlagName::ConfidentialDump.to_string(),
+            "confidential-dump"
+        );
+        assert_eq!(SeHdrFlagName::PckmoDeaTdea.to_string(), "pckmo-dea-tdea");
+        assert_eq!(SeHdrFlagName::PckmoAes.to_string(), "pckmo-aes");
+        assert_eq!(SeHdrFlagName::PckmoEcc.to_string(), "pckmo-ecc");
+        assert_eq!(SeHdrFlagName::PckmoHmac.to_string(), "pckmo-hmac");
+        assert_eq!(
+            SeHdrFlagName::BackupTargetKeys.to_string(),
+            "backup-target-keys"
+        );
+        assert_eq!(
+            SeHdrFlagName::CckExtensionSecretEnforcement.to_string(),
+            "cck-extension-secret-enforcement"
+        );
+        assert_eq!(SeHdrFlagName::CckUpdate.to_string(), "cck-update");
+        assert_eq!(
+            SeHdrFlagName::NoComponentEncryption.to_string(),
+            "no-component-encryption"
+        );
     }
 
     #[test]
