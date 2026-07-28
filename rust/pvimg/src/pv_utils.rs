@@ -21,7 +21,7 @@ pub use se_hdr::{
     ComponentMetadataV1, ControlFlagTrait, EffectiveControlFlags, EnvelopeSeHdrV1, FlagData,
     FlagState, FlagsOverride, IntoEnumIterator, SeH, SeHdr, SeHdrAadV1, SeHdrBinV1, SeHdrBuilder,
     SeHdrControlFlags, SeHdrControlFlagsModel, SeHdrData, SeHdrDataV1, SeHdrDataV2, SeHdrFlag,
-    SeHdrPlain, SeHdrVersion, SeHdrVersioned, SeTarget,
+    SeHdrPlain, SeHdrVersion, SeHdrVersioned, SeTarget, UnknownFlags,
 };
 pub use secured_comp::{ComponentTrait, SecuredComponent, SecuredComponentBuilder};
 pub use serializing::{bytesize, serialize_to_bytes};

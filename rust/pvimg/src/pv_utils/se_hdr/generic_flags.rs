@@ -366,9 +366,17 @@ impl UnknownFlags {
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```
+    /// use pv::misc::Msb0Flags64;
+    /// use pvimg::uvdata::UnknownFlags;
+    ///
+    /// // Create UnknownFlags with bit 5 set
+    /// let flags = Msb0Flags64::from(1u64 << (63 - 5));
+    /// let unknown_flags = UnknownFlags::from_bits(flags);
+    ///
     /// // Using a raw bit position
-    /// unknown_flags.contains(5u8);
+    /// assert!(unknown_flags.contains(5u8));
+    /// assert!(!unknown_flags.contains(10u8));
     /// ```
     #[must_use]
     pub fn contains(&self, position: u8) -> bool {
@@ -433,12 +441,18 @@ impl<T: ControlFlagTrait> EffectiveControlFlags<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// // Using a flag
-    /// flags.has(SeHdrFlag::PckmoAes);
+    /// ```
+    /// use pvimg::uvdata::{SeHdrControlFlagsModel, SeHdrFlag, SeTarget};
     ///
-    /// // Using a raw bit position
-    /// flags.has(5u8);
+    /// // Get default flags for V1
+    /// let pcf_v1 = SeHdrControlFlagsModel::pcf_for_target(SeTarget::V1Max);
+    /// let flags = pcf_v1.with_overrides(&Default::default()).unwrap();
+    ///
+    /// // Using a flag
+    /// assert!(flags.has(SeHdrFlag::PckmoAes));
+    ///
+    /// // Using a raw bit position (PckmoAes is at bit 57)
+    /// assert!(flags.has(57u8));
     /// ```
     pub fn has<P: IntoBitPosition>(&self, position: P) -> bool {
         let bit_pos = position.into_bit_position();

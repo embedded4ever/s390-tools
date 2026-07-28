@@ -19,5 +19,5 @@ pub use flags::{
     ControlFlagTrait, EffectiveControlFlags, FlagData, FlagState, FlagsOverride, SeHdrControlFlags,
     SeHdrControlFlagsModel, SeHdrFlag, SeTarget,
 };
-pub use generic_flags::IntoEnumIterator;
+pub use generic_flags::{IntoEnumIterator, UnknownFlags};
 pub use hdr_v1::SeHdrAadV1;

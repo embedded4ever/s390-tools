@@ -40,8 +40,8 @@ pub mod uvdata {
         EffectiveControlFlags, EnvelopeSeHdrV1, FlagData, FlagState, FlagsOverride,
         IntoEnumIterator, KeyExchangeTrait, SeH, SeHdr, SeHdrAadV1, SeHdrBinV1, SeHdrBuilder,
         SeHdrControlFlags, SeHdrControlFlagsModel, SeHdrData, SeHdrDataV1, SeHdrDataV2, SeHdrFlag,
-        SeHdrPlain, SeHdrVersion, SeHdrVersioned, SeTarget, UvDataPlainTrait, UvDataTrait,
-        UvKeyHashesV1,
+        SeHdrPlain, SeHdrVersion, SeHdrVersioned, SeTarget, UnknownFlags, UvDataPlainTrait,
+        UvDataTrait, UvKeyHashesV1,
     };
 }
 
