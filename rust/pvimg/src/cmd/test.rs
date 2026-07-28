@@ -74,7 +74,11 @@ where
 
     let mut result = false;
     for path in host_key_documents {
-        let hkd = HkdLoader::load_and_verify(path, &NoVerifyHkd, HkdVersionSelection::Auto)?;
+        let hkd = HkdLoader::load_and_verify(
+            path,
+            &NoVerifyHkd,
+            HkdVersionSelection::Explicit(hdr.common.version.into()),
+        )?;
         if hdr.contains(hkd)? {
             result = true;
             log_println!(

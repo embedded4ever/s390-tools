@@ -12,7 +12,7 @@ use pv::request::openssl::pkey::{PKey, Private, Public};
 use pv::request::{seek_se_hdr_start, Aes256XtsKey, Confidential, SymKey, SymKeyType};
 use pv::static_assert;
 use serde::{Deserialize, Serialize};
-use utils::S390ToolsMetaData;
+use utils::{HkdVersion, S390ToolsMetaData};
 
 pub use super::hdr_v1::{SeHdrBinV1, SeHdrDataV1};
 pub use super::hdr_v2::{SeHdrBinV2, SeHdrDataV2};
@@ -63,6 +63,15 @@ pub enum SeHdrVersion {
     V1 = 0x100,
     /// Secure Execution header v2
     V2 = 0x200,
+}
+
+impl From<SeHdrVersion> for HkdVersion {
+    fn from(val: SeHdrVersion) -> Self {
+        match val {
+            SeHdrVersion::V1 => Self::Classical,
+            SeHdrVersion::V2 => Self::Hybrid,
+        }
+    }
 }
 
 impl Display for SeHdrVersion {
