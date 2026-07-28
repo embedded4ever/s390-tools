@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader, Read};
 use enum_dispatch::enum_dispatch;
 use pv::misc::decode_hex;
 
-use super::try_copy_slice_to_array;
+use super::{try_copy_slice_to_array, KeyExchangeTrait, SeHdr};
 use crate::error::{Error, Result};
 
 /// The `enum_dispatch` macros needs at least one local trait to be implemented.
@@ -41,11 +41,111 @@ impl UvKeyHashV1 {
     }
 }
 
+use std::fmt::{self, Display};
+use std::ops::{Index, IndexMut};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UvKeyHashV1Kind {
+    PCHKH,
+    PBHKH,
+    PCHHKH,
+    PBHHKH,
+}
+
+impl Display for UvKeyHashV1Kind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PCHKH => write!(f, "Classical Host key hash"),
+            Self::PBHKH => write!(f, "Backup classical host key hash"),
+            Self::PCHHKH => write!(f, "Hybrid host key hash"),
+            Self::PBHHKH => write!(f, "Backup hybrid host key hash"),
+        }
+    }
+}
+
+/// Index into the UV key hash array.
+///
+/// The indices follow the UV specification layout:
+/// - 0: PCHKH (Classical host key hash)
+/// - 1: PBHKH (Backup classical host key hash)
+/// - 2-3: Reserved for future use
+/// - 4: PCHHKH (Hybrid host key hash)
+/// - 5: PBHHKH (Backup hybrid host key hash)
+/// - 6-14: Reserved for future use
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UvKeyHashIdx(u8);
+
+impl UvKeyHashIdx {
+    pub const PCHKH: Self = Self(0);
+    pub const PBHKH: Self = Self(1);
+    pub const PCHHKH: Self = Self(4);
+    pub const PBHHKH: Self = Self(5);
+
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub fn kind(self) -> Option<UvKeyHashV1Kind> {
+        match self.0 {
+            0 => Some(UvKeyHashV1Kind::PCHKH),
+            1 => Some(UvKeyHashV1Kind::PBHKH),
+            4 => Some(UvKeyHashV1Kind::PCHHKH),
+            5 => Some(UvKeyHashV1Kind::PBHHKH),
+            _ => None,
+        }
+    }
+}
+
+impl TryFrom<usize> for UvKeyHashIdx {
+    type Error = ();
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            0..=14 => Ok(Self(value as u8)),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct UvKeyHashesV1 {
-    pub pchkh: UvKeyHashV1,
-    pub pbhkh: UvKeyHashV1,
-    pub res: [UvKeyHashV1; 13],
+    pub hashes: [UvKeyHashV1; 15],
+}
+
+impl Index<UvKeyHashIdx> for UvKeyHashesV1 {
+    type Output = UvKeyHashV1;
+
+    fn index(&self, pos: UvKeyHashIdx) -> &Self::Output {
+        &self.hashes[pos.index()]
+    }
+}
+
+impl IndexMut<UvKeyHashIdx> for UvKeyHashesV1 {
+    fn index_mut(&mut self, pos: UvKeyHashIdx) -> &mut Self::Output {
+        &mut self.hashes[pos.index()]
+    }
+}
+
+#[derive(Debug)]
+pub struct MatchingUvKeyHash<'a> {
+    pub idx: UvKeyHashIdx,
+    pub hash: &'a UvKeyHashV1,
+}
+
+impl UvKeyHashesV1 {
+    pub fn matching_hashes(&self, hdr: &SeHdr) -> Vec<MatchingUvKeyHash<'_>> {
+        self.hashes
+            .iter()
+            .enumerate()
+            .filter(|(_, hash)| hdr.contains_hash(hash))
+            .filter_map(|(idx, hash)| {
+                Some(MatchingUvKeyHash {
+                    idx: idx.try_into().ok()?,
+                    hash,
+                })
+            })
+            .collect()
+    }
 }
 
 impl UvKeyHashV1 {
@@ -108,9 +208,8 @@ impl UvKeyHashesV1 {
             return Err(Error::InvalidUvKeyHashes);
         }
 
-        let [pchkh, pbhkh, res @ ..]: [UvKeyHashV1; 15] =
-            hashes.try_into().map_err(|_| Error::InvalidUvKeyHashes)?;
-        Ok(Self { pchkh, pbhkh, res })
+        let hashes: [UvKeyHashV1; 15] = hashes.try_into().map_err(|_| Error::InvalidUvKeyHashes)?;
+        Ok(Self { hashes })
     }
 }
 
@@ -142,21 +241,18 @@ mod tests {
 0000000000000000000000000000000000000000000000000000000000000000
 ";
         let result = UvKeyHashesV1::read_from_io(Cursor::new(data)).expect("should not fail");
-        assert_eq!(
-            result,
-            UvKeyHashesV1 {
-                pchkh: UvKeyHashV1::new(
-                    decode_hex("0b729fd62241b339840d61b964a06bb6a1fd4976d9ebea2b4fb48d44de3a2461")
-                        .unwrap()
-                )
-                .unwrap(),
-                pbhkh: UvKeyHashV1::new(
-                    decode_hex("8ec6bc2f77d5d6474b1417cf0a8c914f576245a5b9bb0eefacc7b821483ece7d")
-                        .unwrap()
-                )
-                .unwrap(),
-                res: [UvKeyHashV1::UV_KEY_HASH_NULL; 13],
-            }
-        );
+        let mut exp_hashes = [UvKeyHashV1::UV_KEY_HASH_NULL; 15];
+        exp_hashes[0] = UvKeyHashV1::new(
+            decode_hex("0b729fd62241b339840d61b964a06bb6a1fd4976d9ebea2b4fb48d44de3a2461").unwrap(),
+        )
+        .unwrap();
+
+        exp_hashes[1] = UvKeyHashV1::new(
+            decode_hex("8ec6bc2f77d5d6474b1417cf0a8c914f576245a5b9bb0eefacc7b821483ece7d").unwrap(),
+        )
+        .unwrap();
+
+        let uv_hashes = UvKeyHashesV1 { hashes: exp_hashes };
+        assert_eq!(result, uv_hashes);
     }
 }

@@ -33,32 +33,25 @@ fn hdr_test_target_hashes(hdr: &SeHdr, key_hashes: &Path) -> Result<bool> {
         err => Error::PvCore(err),
     })?;
     let hashes = UvKeyHashesV1::read_from_io(file)?;
-    let mut contains = hdr.contains_hash(&hashes.pchkh);
-    if contains {
-        log_println!(
-            " ✓ Host key hash {:#} is included",
-            HexSlice::from(&hashes.pchkh)
-        );
-    }
-    if hdr.contains_hash(&hashes.pbhkh) {
-        log_println!(
-            " ✓ Backup host key hash {:#} is included",
-            HexSlice::from(&hashes.pbhkh)
-        );
-        contains = true;
-    };
-
-    for hash in hashes.res {
-        if hdr.contains_hash(&hash) {
-            log_println!(" ✓ Key hash {:#} is included", HexSlice::from(&hash));
-            contains = true;
-        }
-    }
-
-    if !contains {
+    let matches = hashes.matching_hashes(hdr);
+    if matches.is_empty() {
         warn!(" ✘ None of the key hashes is included");
+        Ok(false)
+    } else {
+        for m in matches {
+            match m.idx.kind() {
+                Some(kind) => {
+                    log_println!(" ✓ {kind} {:#} is included", HexSlice::from(&m.hash))
+                }
+                None => log_println!(
+                    " ✓ Key hash {:#} is included (zero-based index {})",
+                    HexSlice::from(&m.hash),
+                    m.idx.index()
+                ),
+            }
+        }
+        Ok(true)
     }
-    Ok(contains)
 }
 
 /// Returns `Ok(true)` if at least one of the given public key of the host key
