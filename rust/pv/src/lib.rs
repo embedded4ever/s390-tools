@@ -79,7 +79,7 @@ pub mod pem {
 pub mod misc {
     pub use pv_core::misc::*;
 
-    pub use crate::utils::{read_certs, read_hkd};
+    pub use crate::utils::read_certs;
 }
 
 pub use error::{Error, Result};

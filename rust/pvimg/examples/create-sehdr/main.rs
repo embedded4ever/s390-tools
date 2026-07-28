@@ -12,13 +12,16 @@ use std::str::FromStr;
 use anyhow::{anyhow, Context, Error};
 use clap::{Parser, ValueEnum, ValueHint};
 use log::info;
-use pv::misc::{decode_hex, open_file, read_file, read_hkd, try_parse_u64};
-use pv::request::{HostKey, SymKeyType};
+use pv::misc::{decode_hex, open_file, read_file, try_parse_u64};
+use pv::request::{HostKey, NoVerifyHkd, SymKeyType};
 use pv::Result;
 use pvimg::misc::PSW;
 use pvimg::secured_comp::{ComponentTrait, Layout, SecuredComponentBuilder};
 use pvimg::uvdata::{BuilderTrait, SeHdrBuilder, SeHdrControlFlags, SeHdrVersion, SeTarget};
-use utils::{AtomicFile, AtomicFileOperation, HexSlice, PvLogger, VerbosityOptions};
+use utils::{
+    AtomicFile, AtomicFileOperation, HexSlice, HkdLoader, HkdVersionSelection, PvLogger,
+    VerbosityOptions,
+};
 
 /// Converts the hexstring into a byte vector.
 ///
@@ -245,7 +248,7 @@ fn main() -> anyhow::Result<()> {
             "Use the file '{}' as a host key document",
             hkd_path.display()
         );
-        let cert = read_hkd(&hkd_path)?;
+        let cert = HkdLoader::load_and_verify(&hkd_path, &NoVerifyHkd, HkdVersionSelection::Auto)?;
         target_pub_keys.push(cert);
     }
     let version: SeHdrVersion = args

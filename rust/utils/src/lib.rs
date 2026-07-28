@@ -7,6 +7,7 @@ mod cli;
 mod exit_code;
 mod file;
 mod hexslice;
+pub mod hkd;
 mod hostname;
 mod json;
 mod log;
@@ -19,12 +20,13 @@ pub use utils_macros::{ControlFlag, ValueEnumDisplay, ValueEnumFromStr};
 pub use crate::cli::{
     combined_path_opt, combined_path_req, get_reader_from_cli_file_arg,
     get_writer_from_cli_file_arg, print_cli_error, print_error, AutoOrExplicit,
-    AutoOrExplicitParser, CertificateOptions, DeprecatedVerbosityOptions, HkdVersion,
-    HkdVersionSelection, VerbosityOptions, STDIN, STDOUT,
+    AutoOrExplicitParser, CertificateOptions, DeprecatedVerbosityOptions, VerbosityOptions, STDIN,
+    STDOUT,
 };
 pub use crate::exit_code::{docstring, ExitCodeDoc, ExitCodeTrait, ExitCodeVariantDoc};
 pub use crate::file::{AtomicFile, AtomicFileOperation};
 pub use crate::hexslice::HexSlice;
+pub use crate::hkd::{HkdLoader, HkdVersion, HkdVersionSelection};
 pub use crate::hostname::gethostname;
 pub use crate::json::S390ToolsMetaData;
 pub use crate::log::PvLogger;

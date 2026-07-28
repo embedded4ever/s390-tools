@@ -6,10 +6,12 @@ use std::path::Path;
 
 use anyhow::Result;
 use log::{info, warn};
-use pv::misc::{open_file, read_hkd};
+use pv::misc::open_file;
+use pv::request::NoVerifyHkd;
 use pv::{FileAccessErrorType, PvCoreError};
 use pvimg::error::{Error, OwnExitCode};
 use pvimg::uvdata::{KeyExchangeTrait, SeHdr, UvKeyHashesV1};
+use utils::hkd::{HkdLoader, HkdVersionSelection};
 use utils::HexSlice;
 
 use crate::cli::TestArgs;
@@ -72,7 +74,7 @@ where
 
     let mut result = false;
     for path in host_key_documents {
-        let hkd = read_hkd(path)?;
+        let hkd = HkdLoader::load_and_verify(path, &NoVerifyHkd, HkdVersionSelection::Auto)?;
         if hdr.contains(hkd)? {
             result = true;
             log_println!(

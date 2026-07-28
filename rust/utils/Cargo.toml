@@ -9,6 +9,7 @@ chrono = { version = "0.4.44", default-features = false, features = ["std"] }
 clap = { version ="4.6", features = ["derive", "wrap_help"] }
 libc = "0.2.186"
 log = { version = "0.4.29", features = ["std", "release_max_level_debug"] }
+openssl = "0.10"
 pv = { path = "../pv", package = "s390_pv" }
 serde = { version = "1.0.228"}
 
