@@ -479,15 +479,54 @@ out:
 	return rc;
 }
 
+/*
+ * Returns true if the specified path is within the base path.
+ * It canonicalizes both, the base path and the path, and compares that
+ * the path starts with the base path followed by a '/'.
+ */
+static bool is_path_within_base_path(const char *base_path, const char *path)
+{
+	char *real_base_path, *real_path;
+	size_t base_len;
+	bool ret = false;
+
+	real_base_path = canonicalize_file_name(base_path);
+	real_path = canonicalize_file_name(path);
+
+	if (real_base_path == NULL || real_path == NULL) {
+		warnx("Failed to resolve path for safety check: %s",
+		      strerror(errno));
+		goto out;
+	}
+
+	/* Require path to be strictly inside the base path */
+	base_len = strlen(real_base_path);
+	if (strncmp(real_path, real_base_path, base_len) != 0 ||
+	    real_path[base_len] != '/') {
+		warnx("'%s' is not inside '%s'", path, base_path);
+		goto out;
+	}
+
+	ret = true;
+
+out:
+	free(real_base_path);
+	free(real_path);
+
+	return ret;
+}
+
 /**
  * Initializes the KMS plugin.
  *
  * @param[in] kms_info        The KMS Plugin info
+ * @param[in] keystore        the keystore to bind to the plugin
  * @param[in] verbose         if true, verbose messages are printed
  *
  * @returns 0 for success or a negative errno in case of an error.
  */
-int init_kms_plugin(struct kms_info *kms_info, bool verbose)
+int init_kms_plugin(struct kms_info *kms_info, struct keystore *keystore,
+		    bool verbose)
 {
 	char *config_path = NULL;
 	char **apqn_list = NULL;
@@ -495,11 +534,18 @@ int init_kms_plugin(struct kms_info *kms_info, bool verbose)
 	int i, rc = 0;
 
 	util_assert(kms_info != NULL, "Internal error: kms_info is NULL");
+	util_assert(keystore != NULL, "Internal error: keystore is NULL");
 
 	config_path = properties_get(kms_info->props,
 				     KMS_CONFIG_PROP_KMS_CONFIG);
 	if (config_path == NULL) {
 		warnx("Incomplete KMS configuration");
+		rc = -EIO;
+		goto out;
+	}
+
+	if (!is_path_within_base_path(keystore->directory, config_path)) {
+		warnx("Invalid KMS config directory: '%s'", config_path);
 		rc = -EIO;
 		goto out;
 	}

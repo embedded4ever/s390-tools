@@ -33,7 +33,8 @@ int list_kms_plugins(bool verbose);
 
 int check_for_kms_plugin(struct kms_info *kms_info, bool verbose);
 
-int init_kms_plugin(struct kms_info *kms_info, bool verbose);
+int init_kms_plugin(struct kms_info *kms_info, struct keystore *keystore,
+		    bool verbose);
 
 void free_kms_plugin(struct kms_info *kms_info);
 

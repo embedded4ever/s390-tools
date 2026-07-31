@@ -3798,7 +3798,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (g.kms_info.plugin_lib != NULL) {
-		rc = init_kms_plugin(&g.kms_info, g.verbose);
+		rc = init_kms_plugin(&g.kms_info, g.keystore, g.verbose);
 		if (rc != 0) {
 			rc = EXIT_FAILURE;
 			goto out;
