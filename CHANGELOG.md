@@ -1,15 +1,31 @@
 Release history for s390-tools (MIT version)
 --------------------------------------------
 
-* __v2.xx.x (20xx-xx-xx)__
+* __v2.44.0 (2026-07-31)__
 
-  For Linux kernel version: 7.x
+  For Linux kernel version: 7.2
 
-  Add new tools / libraries:
-
-  Changes of existing tools:
+  Changes of existing tools / libraries:
+  - create-sehdr: Enable quantum safe keys usage
+  - dbginfo.sh: Let zpcimon log both optical module and SMART data
+  - libutil/util_fmt: Add util_fmt_type_to_name()
+  - nvmemon: Skip SCLP on NVMes with non-IBM subsystem vendor ID
+  - opticsmon: zpcimon: Rename opticsmon to zpcimon
+  - pvattest: Enable quantum safe keys usage
+  - pvimg: Add '--flags <...>' and '--disable-flags <...>' option
+  - pvimg: Enable quantum safe keys usage
+  - pvsecret: Enable quantum safe keys usage
+  - pvverify: Enable quantum safe keys usage
+  - zmemtopo: Add CLI option to filter partitions by name
+  - zpcimon: Allow setting output format using --format CLI option
+  - zpcimon: Monitor for hotplug of NVMes to trigger SMART collection
 
   Bug Fixes:
+  - opticsmon: Fix wrong size check for OPTICS_QSFP28_LOS_IMPLEMENTED_OFFSET
+  - opticsmon: Handle error return of ethtool_nl_connect()
+  - opticsmon: Fix error path free of struct optics in ethtool_nl_get_optics()
+  - opticsmon: Close epoll fd in monitor_wait_loop()
+  - opticsmon: Fix wrong JSON print for tx_fault
 
 * __v2.43.1 (2026-07-22)__
 
