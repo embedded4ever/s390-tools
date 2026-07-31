@@ -252,7 +252,7 @@ static int _get_ekmf_config(struct plugin_handle *ph)
 		free(tmp);
 	tmp = properties_get(ph->pd.properties, EKMFWEB_CONFIG_VERIFY_HOSTNAME);
 	ph->ekmf_config.tls_verify_host =
-				(tmp != NULL && strcasecmp(tmp, "yes") == 0);
+				(tmp == NULL || strcasecmp(tmp, "yes") == 0);
 	if (tmp != NULL)
 		free(tmp);
 	ph->ekmf_config.max_redirs = 0;
@@ -668,12 +668,14 @@ int kms_display_info(const kms_handle_t handle)
 		printf("  The server's certificate is not verified\n");
 	}
 	tmp = properties_get(ph->pd.properties, EKMFWEB_CONFIG_VERIFY_HOSTNAME);
-	if (tmp != NULL) {
-		if (strcasecmp(tmp, "yes") == 0)
-			printf("  The server's certificate must match the "
-			       "hostname\n");
+	if (tmp == NULL || strcasecmp(tmp, "yes") == 0)
+		printf("  The server's certificate must match the "
+		       "hostname\n");
+	else
+		printf("  ATTENTION: The server's certificate is NOT checked "
+		       "to match the hostname\n");
+	if (tmp != NULL)
 		free(tmp);
-	}
 
 	tmp = properties_get(ph->pd.properties, EKMFWEB_CONFIG_EKMFWEB_PUBKEY);
 	if (tmp != NULL) {
@@ -826,6 +828,7 @@ int kms_display_info(const kms_handle_t handle)
 #define OPT_KT_RSA_SIGNATURE_DIGEST		263
 #define OPT_KT_RSA_PSS_SIGNATURE		264
 #endif
+#define OPT_TLS_DONT_VERIFY_HOSTNAME		265
 
 static const struct util_opt configure_options[] = {
 	{
@@ -921,10 +924,23 @@ static const struct util_opt configure_options[] = {
 		.option = { "tls-verify-hostname", 0, NULL,
 						OPT_TLS_VERIFY_HOSTNAME },
 		.flags = UTIL_OPT_FLAG_NOSHORT,
-		.desc = "Verify that the EKMF Web server certificate's 'Common "
-			"Name' field or a 'Subject Alternate Name' field "
-			"matches the host name used to connect to the EKMF "
-			"Web server.",
+		.desc = "This option has no effect anymore. The (new) default "
+			"is to always verify that the EKMF Web server "
+			"certificate's 'Common Name' field or a 'Subject "
+			"Alternate Name' field matches the hostname that is "
+			"used to connect to the EKMF Web server. To disable "
+			"this check, use option '--tls-dont-verify-hostname'.",
+		.command = KMS_COMMAND_CONFIGURE,
+	},
+	{
+		.option = { "tls-dont-verify-hostname", 0, NULL,
+						OPT_TLS_DONT_VERIFY_HOSTNAME },
+		.flags = UTIL_OPT_FLAG_NOSHORT,
+		.desc = "Disables the verification of the EKMF Web server "
+			"certificate's 'Common Name' field or a 'Subject "
+			"Alternate Name' field matching the hostname that is "
+			"used to connect to the EKMF Web server. This is an "
+			"insecure setting, use with care!",
 		.command = KMS_COMMAND_CONFIGURE,
 	},
 	{
@@ -1812,7 +1828,7 @@ out:
  * @param tls_pin_server_pubkey if true, pin the server public key
  * @param tls_trust_server_cert if true, trust the server certificate
  * @param tls_dont_verify_server_cert if true, don't verify the server cert
- * @param tls_verify_hostname if true verify the server's hostname
+ * @param tls_dont_verify_hostname if true don't verify the server's hostname
  *
  * @returns 0 on success, a negative errno in case of an error.
  */
@@ -1825,7 +1841,7 @@ static int _configure_connection(struct plugin_handle *ph,
 				 bool tls_pin_server_pubkey,
 				 bool tls_trust_server_cert,
 				 bool tls_dont_verify_server_cert,
-				 bool tls_verify_hostname)
+				 bool tls_dont_verify_hostname)
 {
 	char *server_pubkey_temp = NULL;
 	char *server_pubkey_file = NULL;
@@ -2027,7 +2043,7 @@ static int _configure_connection(struct plugin_handle *ph,
 	if (rc != 0)
 		goto out;
 
-	ph->ekmf_config.tls_verify_host = tls_verify_hostname;
+	ph->ekmf_config.tls_verify_host = !tls_dont_verify_hostname;
 	rc = plugin_set_or_remove_property(&ph->pd,
 					   EKMFWEB_CONFIG_VERIFY_HOSTNAME,
 					   ph->ekmf_config.tls_verify_host ?
@@ -2110,6 +2126,7 @@ struct config_options {
 	bool tls_trust_server_cert;
 	bool tls_dont_verify_server_cert;
 	bool tls_verify_hostname;
+	bool tls_dont_verify_hostname;
 	bool refresh_settings;
 	bool generate_identity_key;
 	const char *sscert_pem_file;
@@ -2191,6 +2208,12 @@ static int _error_connection_opts(struct plugin_handle *ph,
 	if (opts->tls_verify_hostname) {
 		_set_error(ph, "Option '--tls-verify-hostname' is only valid "
 			   "together with option '--ekmfweb-url'.");
+		rc = -EINVAL;
+		goto out;
+	}
+	if (opts->tls_dont_verify_hostname) {
+		_set_error(ph, "Option '--tls-dont-verify-hostname' is only "
+			   "valid together with option '--ekmfweb-url'.");
 		rc = -EINVAL;
 		goto out;
 	}
@@ -3214,6 +3237,9 @@ int kms_configure(const kms_handle_t handle,
 		case OPT_TLS_VERIFY_HOSTNAME:
 			opts.tls_verify_hostname = true;
 			break;
+		case OPT_TLS_DONT_VERIFY_HOSTNAME:
+			opts.tls_dont_verify_hostname = true;
+			break;
 		case 'R':
 			opts.refresh_settings = true;
 			break;
@@ -3276,6 +3302,14 @@ int kms_configure(const kms_handle_t handle,
 	}
 
 	if (opts.ekmfweb_url != NULL) {
+		if (opts.tls_verify_hostname && opts.tls_dont_verify_hostname) {
+			_set_error(ph, "Options '--tls-verify-hostname' and "
+				   "'--tls-dont-verify-hostname' cannot be "
+				   "both specified.");
+			rc = -EINVAL;
+			goto out;
+		}
+
 		rc = _configure_connection(ph, opts.ekmfweb_url,
 					   opts.tls_ca_bundle,
 					   opts.tls_client_cert,
@@ -3284,7 +3318,7 @@ int kms_configure(const kms_handle_t handle,
 					   opts.tls_pin_server_pubkey,
 					   opts.tls_trust_server_cert,
 					   opts.tls_dont_verify_server_cert,
-					   opts.tls_verify_hostname);
+					   opts.tls_dont_verify_hostname);
 		if (rc == 0) {
 			config_changed = true;
 			opts.refresh_settings = false; /* Already done */

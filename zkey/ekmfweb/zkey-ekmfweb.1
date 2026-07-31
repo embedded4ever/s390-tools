@@ -289,9 +289,17 @@ authenticity explicitly. CA signed EKMF Web server certificates are verified by
 default. This option disables the verification.
 .TP
 .BR \-\-tls\-verify\-hostname
- Verify that the EKMF Web server certificate's \fBCommon Name\fP field or a
-\fBSubject Alternate Name\fP field matches the host name used to connect to the
+This option has no effect anymore. The (new) default is to always verify that
+the EKMF Web server certificate's \fBCommon Name\fP field or a \fBSubject
+Alternate Name\fP field matches the hostname that is used to connect to the
 EKMF Web server.
+To disable this check, use option \fB\-\-tls\-dont\-verify\-hostname\fP.
+.TP
+.BR \-\-tls\-dont\-verify\-hostname
+Disables the verification of the EKMF Web server certificates \fBCommon Name\fP
+field or a \fBSubject Alternate Name\fP field matching the hostname that is
+used to connect to the EKMF Web server. This is an insecure setting, use with
+care!
 .TP
 .BR \-R ", " \-\-refresh\-settings
 Refresh the EKMF Web server settings. This is automatically performed when the
