@@ -445,6 +445,8 @@ static int mv_dumper_read(void)
 	if (strncmp(l.dumper.magic, DF_S390_DUMPER_MAGIC_MV_EXT, DF_S390_DUMPER_MAGIC_SIZE) != 0)
 		return -ENODEV;
 	table_read(g.fh, l.blk_size, &l.table);
+	if (l.table.vol_cnt > MAX_VOLUMES)
+		return -ENODEV;
 	return 0;
 }
 
