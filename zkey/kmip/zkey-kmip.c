@@ -717,7 +717,7 @@ static int _get_kmip_config(struct plugin_handle *ph)
 		free(tmp);
 	tmp = properties_get(ph->pd.properties, KMIP_CONFIG_VERIFY_HOSTNAME);
 	ph->kmip_config.tls_verify_host =
-				(tmp != NULL && strcasecmp(tmp, "yes") == 0);
+				(tmp == NULL || strcasecmp(tmp, "yes") == 0);
 	if (tmp != NULL)
 		free(tmp);
 
@@ -1082,12 +1082,13 @@ int kms_display_info(const kms_handle_t handle)
 	if (tmp != NULL)
 		free(tmp);
 	tmp = properties_get(ph->pd.properties, KMIP_CONFIG_VERIFY_HOSTNAME);
-	if (tmp != NULL) {
-		if (strcasecmp(tmp, "yes") == 0)
-			printf("  The server's certificate must match the "
-			       "hostname\n");
+	if (tmp == NULL || strcasecmp(tmp, "yes") == 0)
+		printf("  The server's certificate must match the hostname\n");
+	else
+		printf("  ATTENTION: The server's certificate is NOT checked "
+		       "to match the hostname\n");
+	if (tmp != NULL)
 		free(tmp);
-	}
 
 	if (ph->profile != NULL) {
 		switch (ph->profile->auth_scheme) {
@@ -1163,6 +1164,7 @@ int kms_display_info(const kms_handle_t handle)
 #define OPT_TLS_TRUST_SERVER_CERT		257
 #define OPT_TLS_DONT_VERIFY_SERVER_CERT		258
 #define OPT_TLS_VERIFY_HOSTNAME			259
+#define OPT_TLS_DONT_VERIFY_HOSTNAME		260
 
 static const struct util_opt configure_options[] = {
 	{
@@ -1399,10 +1401,23 @@ static const struct util_opt configure_options[] = {
 		.option = { "tls-verify-hostname", 0, NULL,
 						OPT_TLS_VERIFY_HOSTNAME },
 		.flags = UTIL_OPT_FLAG_NOSHORT,
-		.desc = "Verifies that the KMIP server certificates 'Common "
-			"Name' field or a 'Subject Alternate Name' field "
-			"matches the hostname that is used to connect to the "
-			"KMIP server.",
+		.desc = "This option has no effect anymore. The (new) default "
+			"is to always verify that the KMIP server certificate's"
+			" 'Common Name' field or a 'Subject Alternate Name' "
+			"field matches the hostname that is used to connect to "
+			"the KMIP server. To disable this check, use option "
+			"'--tls-dont-verify-hostname'.",
+		.command = KMS_COMMAND_CONFIGURE,
+	},
+	{
+		.option = { "tls-dont-verify-hostname", 0, NULL,
+						OPT_TLS_DONT_VERIFY_HOSTNAME },
+		.flags = UTIL_OPT_FLAG_NOSHORT,
+		.desc = "Disables the verification of the KMIP server "
+			"certificate's 'Common Name' field or a 'Subject "
+			"Alternate Name' field matching the hostname that is "
+			"used to connect to the KMIP server. This is an "
+			"insecure setting, use with care!",
 		.command = KMS_COMMAND_CONFIGURE,
 	},
 	{
@@ -1551,6 +1566,7 @@ struct config_options {
 	bool tls_trust_server_cert;
 	bool tls_dont_verify_server_cert;
 	bool tls_verify_hostname;
+	bool tls_dont_verify_hostname;
 	bool gen_wrapping_key;
 	const char *wrapping_key_label;
 };
@@ -2698,7 +2714,7 @@ out:
  * @param tls_pin_server_pubkey if true, pin the server public key
  * @param tls_trust_server_cert if true, trust the server certificate
  * @param tls_dont_verify_server_cert if true, don't verify the server cert
- * @param tls_verify_hostname if true verify the server's hostname
+ * @param tls_dont_verify_hostname if true don't verify the server's hostname
  *
  * @returns 0 on success, a negative errno in case of an error.
  */
@@ -2709,7 +2725,7 @@ static int _configure_connection(struct plugin_handle *ph,
 				 bool tls_pin_server_pubkey,
 				 bool tls_trust_server_cert,
 				 bool tls_dont_verify_server_cert,
-				 bool tls_verify_hostname)
+				 bool tls_dont_verify_hostname)
 {
 	char *server_pubkey_temp = NULL;
 	char *server_pubkey_file = NULL;
@@ -2886,7 +2902,7 @@ static int _configure_connection(struct plugin_handle *ph,
 	if (rc != 0)
 		goto out;
 
-	ph->kmip_config.tls_verify_host = tls_verify_hostname;
+	ph->kmip_config.tls_verify_host = !tls_dont_verify_hostname;
 	rc = plugin_set_or_remove_property(&ph->pd,
 					   KMIP_CONFIG_VERIFY_HOSTNAME,
 					   ph->kmip_config.tls_verify_host ?
@@ -3137,6 +3153,12 @@ static int _error_connection_opts(struct plugin_handle *ph,
 	if (opts->tls_verify_hostname) {
 		_set_error(ph, "Option '--tls-verify-hostname' is only valid "
 			   "together with option '--kmip-server'.");
+		rc = -EINVAL;
+		goto out;
+	}
+	if (opts->tls_dont_verify_hostname) {
+		_set_error(ph, "Option '--tls-dont-verify-hostname' is only "
+			   "valid together with option '--kmip-server'.");
 		rc = -EINVAL;
 		goto out;
 	}
@@ -4171,6 +4193,9 @@ int kms_configure(const kms_handle_t handle,
 		case OPT_TLS_VERIFY_HOSTNAME:
 			opts.tls_verify_hostname = true;
 			break;
+		case OPT_TLS_DONT_VERIFY_HOSTNAME:
+			opts.tls_dont_verify_hostname = true;
+			break;
 		case 'w':
 			opts.gen_wrapping_key = true;
 			break;
@@ -4240,13 +4265,21 @@ int kms_configure(const kms_handle_t handle,
 	}
 
 	if (opts.kmip_server != NULL) {
+		if (opts.tls_verify_hostname && opts.tls_dont_verify_hostname) {
+			_set_error(ph, "Options '--tls-verify-hostname' and "
+				   "'--tls-dont-verify-hostname' cannot be "
+				   "both specified.");
+			rc = -EINVAL;
+			goto out;
+		}
+
 		rc = _configure_connection(ph, opts.kmip_server,
 					   opts.profile,
 					   opts.tls_ca_bundle,
 					   opts.tls_pin_server_pubkey,
 					   opts.tls_trust_server_cert,
 					   opts.tls_dont_verify_server_cert,
-					   opts.tls_verify_hostname);
+					   opts.tls_dont_verify_hostname);
 		config_changed = true;
 		opts.gen_wrapping_key = true;
 	} else {
