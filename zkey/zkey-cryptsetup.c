@@ -2066,6 +2066,7 @@ static int reencipher_prepare(int token)
 out:
 	secure_free(password, password_len);
 	secure_free(key, keysize);
+	free(integrity_spec);
 
 	return rc;
 }
@@ -2221,6 +2222,7 @@ static int reencipher_complete(int token)
 out:
 	secure_free(password, password_len);
 	secure_free(key, keysize);
+	free(integrity_spec);
 
 	return rc;
 }
