@@ -15,9 +15,11 @@
 #include <stdio.h>
 #include <errno.h>
 #include <err.h>
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "kms-plugin.h"
 #include "cca.h"
@@ -25,6 +27,7 @@
 struct plugin_data {
 	const char *plugin_name;
 	const char *config_path;
+	int config_path_fd;
 	mode_t config_path_mode;
 	gid_t config_path_owner;
 	const char *config_file;
@@ -42,6 +45,14 @@ struct plugin_data {
 		}							\
 	} while (0)
 
+static inline const char *plugin_basename(const char *path)
+{
+	const char *base;
+
+	base = strrchr(path, '/');
+	return base != NULL ? base + 1 : path;
+}
+
 int plugin_init(struct plugin_data *pd, const char *plugin_name,
 		const char *config_path, const char *config_file,
 		bool verbose);
@@ -53,6 +64,8 @@ void plugin_set_error(struct plugin_data *pd, const char *fmt, ...);
 int plugin_load_config(struct plugin_data *pd);
 int plugin_save_config(struct plugin_data *pd);
 int plugin_set_file_permission(struct plugin_data *pd, const char *filename);
+int plugin_remove_config_file(struct plugin_data *pd, const char *filename);
+bool plugin_path_is_within_config(struct plugin_data *pd, const char *path);
 
 bool plugin_check_property(struct plugin_data *pd, const char *name);
 int plugin_set_or_remove_property(struct plugin_data *pd, const char *name,

@@ -799,6 +799,12 @@ kms_handle_t kms_initialize(const char *config_path, bool verbose)
 
 	ph->identity_secure_key = properties_get(ph->pd.properties,
 						 KMIP_CONFIG_IDENTITY_KEY);
+	if (ph->identity_secure_key != NULL &&
+	    !plugin_path_is_within_config(&ph->pd, ph->identity_secure_key)) {
+		rc = -EINVAL;
+		goto error;
+	}
+
 	ph->server = properties_get(ph->pd.properties, KMIP_CONFIG_SERVER);
 
 	tmp = properties_get(ph->pd.properties, KMIP_CONFIG_PROFILE);
@@ -1797,7 +1803,7 @@ static int _generate_identity_key(struct plugin_handle *ph,
 	reenc_file = properties_get(ph->pd.properties,
 				    KMIP_CONFIG_IDENTITY_KEY_REENC);
 	if (reenc_file != NULL) {
-		remove(reenc_file);
+		plugin_remove_config_file(&ph->pd, reenc_file);
 		free(reenc_file);
 		properties_remove(ph->pd.properties,
 				  KMIP_CONFIG_IDENTITY_KEY_REENC);
@@ -1806,7 +1812,7 @@ static int _generate_identity_key(struct plugin_handle *ph,
 	client_cert = properties_get(ph->pd.properties,
 				     KMIP_CONFIG_CLIENT_CERTIFICATE);
 	if (client_cert != NULL) {
-		remove(client_cert);
+		plugin_remove_config_file(&ph->pd, client_cert);
 		free(client_cert);
 		properties_remove(ph->pd.properties,
 				  KMIP_CONFIG_CLIENT_CERTIFICATE);
@@ -2994,7 +3000,7 @@ static int _configure_connection(struct plugin_handle *ph,
 		if (rc != 0)
 			goto out;
 	} else {
-		remove(server_cert_file);
+		plugin_remove_config_file(&ph->pd, server_cert_file);
 	}
 	rc = plugin_set_or_remove_property(&ph->pd, KMIP_CONFIG_SERVER_CERT,
 					   tls_trust_server_cert ?
@@ -3013,7 +3019,7 @@ static int _configure_connection(struct plugin_handle *ph,
 		if (rc != 0)
 			goto out;
 	} else {
-		remove(server_pubkey_file);
+		plugin_remove_config_file(&ph->pd, server_pubkey_file);
 	}
 	rc = plugin_set_or_remove_property(&ph->pd,
 					   KMIP_CONFIG_SERVER_PUBKEY,
@@ -3025,13 +3031,13 @@ static int _configure_connection(struct plugin_handle *ph,
 	/* Remove any wrapping key properties from previous configuration */
 	file_name = properties_get(ph->pd.properties, KMIP_CONFIG_WRAPPING_KEY);
 	if (file_name != NULL) {
-		remove(file_name);
+		plugin_remove_config_file(&ph->pd, file_name);
 		free(file_name);
 	}
 	file_name = properties_get(ph->pd.properties,
 				   KMIP_CONFIG_WRAPPING_KEY_REENC);
 	if (file_name != NULL) {
-		remove(file_name);
+		plugin_remove_config_file(&ph->pd, file_name);
 		free(file_name);
 	}
 	rc = plugin_set_or_remove_property(&ph->pd, KMIP_CONFIG_WRAPPING_KEY,
@@ -3066,13 +3072,13 @@ static int _configure_connection(struct plugin_handle *ph,
 
 out:
 	if (server_cert_temp != NULL) {
-		remove(server_cert_temp);
+		plugin_remove_config_file(&ph->pd, server_cert_temp);
 		free(server_cert_temp);
 	}
 	if (server_cert_file != NULL)
 		free(server_cert_file);
 	if (server_pubkey_temp != NULL) {
-		remove(server_pubkey_temp);
+		plugin_remove_config_file(&ph->pd, server_pubkey_temp);
 		free(server_pubkey_temp);
 	}
 	if (server_pubkey_file != NULL)
@@ -3961,7 +3967,7 @@ static int _generate_wrapping_key(struct plugin_handle *ph,
 	reenc_file = properties_get(ph->pd.properties,
 				    KMIP_CONFIG_WRAPPING_KEY_REENC);
 	if (reenc_file != NULL) {
-		remove(reenc_file);
+		plugin_remove_config_file(&ph->pd, reenc_file);
 		free(reenc_file);
 		properties_remove(ph->pd.properties,
 				  KMIP_CONFIG_WRAPPING_KEY_REENC);
@@ -3997,7 +4003,7 @@ static int _generate_wrapping_key(struct plugin_handle *ph,
 
 out:
 	if (wrapping_key_file_tmp != NULL) {
-		remove(wrapping_key_file_tmp);
+		plugin_remove_config_file(&ph->pd, wrapping_key_file_tmp);
 		free(wrapping_key_file_tmp);
 	}
 	if (wrapping_key_file != NULL)
@@ -4360,15 +4366,15 @@ static int _complete_reencipher(struct plugin_handle *ph,
 	if (key_file == NULL || reenc_file == NULL)
 		goto out;
 
-	rc = remove(key_file);
+	rc = plugin_remove_config_file(&ph->pd, key_file);
 	if (rc != 0) {
-		rc = -errno;
 		_set_error(ph, "Failed to remove file '%s': %s",
-			   key_file,  strerror(-rc));
+			   key_file, strerror(-rc));
 		goto out;
 	}
 
-	rc = rename(reenc_file, key_file);
+	rc = renameat(ph->pd.config_path_fd, plugin_basename(reenc_file),
+		      ph->pd.config_path_fd, plugin_basename(key_file));
 	if (rc != 0) {
 		rc = -errno;
 		_set_error(ph, "Failed to rename file '%s' to '%s': %s",
@@ -4604,9 +4610,18 @@ int kms_reenciper(const kms_handle_t handle, enum kms_reencipher_mode mode,
 					KMIP_CONFIG_IDENTITY_KEY);
 	if (ident_key_file == NULL)
 		goto out;
+	if (!plugin_path_is_within_config(&ph->pd, ident_key_file)) {
+		rc = -EINVAL;
+		goto out;
+	}
 
 	wrap_key_file = properties_get(ph->pd.properties,
 				       KMIP_CONFIG_WRAPPING_KEY);
+	if (wrap_key_file != NULL &&
+	    !plugin_path_is_within_config(&ph->pd, wrap_key_file)) {
+		rc = -EINVAL;
+		goto out;
+	}
 	if (mode == KMS_REENC_MODE_STAGED) {
 		util_asprintf(&ident_reenc_file, "%s/%s",
 			      ph->pd.config_path,
@@ -4709,14 +4724,14 @@ int kms_reenciper(const kms_handle_t handle, enum kms_reencipher_mode mode,
 
 out:
 	if (rc != 0 && ident_reenc_file != NULL)
-		remove(ident_reenc_file);
+		plugin_remove_config_file(&ph->pd, ident_reenc_file);
 	if (ident_reenc_file != NULL)
 		free(ident_reenc_file);
 	if (ident_key_file != NULL)
 		free(ident_key_file);
 
 	if (rc != 0 && wrap_reenc_file != NULL)
-		remove(wrap_reenc_file);
+		plugin_remove_config_file(&ph->pd, wrap_reenc_file);
 	if (wrap_reenc_file != NULL)
 		free(wrap_reenc_file);
 	if (wrap_key_file != NULL)

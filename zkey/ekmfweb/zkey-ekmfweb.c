@@ -218,6 +218,10 @@ static int _get_ekmf_config(struct plugin_handle *ph)
 
 	ph->ekmf_config.identity_secure_key = properties_get(ph->pd.properties,
 						EKMFWEB_CONFIG_IDENTITY_KEY);
+	if (ph->ekmf_config.identity_secure_key != NULL &&
+	    !plugin_path_is_within_config(&ph->pd,
+					  ph->ekmf_config.identity_secure_key))
+		return -EINVAL;
 
 	ph->ekmf_config.base_url = properties_get(ph->pd.properties,
 						  EKMFWEB_CONFIG_URL);
@@ -305,7 +309,7 @@ static void _remove_login_token_if_error(struct plugin_handle *ph, int error)
 	switch (error) {
 	case -EACCES:
 	case -EPERM:
-		remove(ph->ekmf_config.login_token);
+		plugin_remove_config_file(&ph->pd, ph->ekmf_config.login_token);
 		FREE_AND_SET_NULL(ph->ekmf_config.login_token);
 		break;
 	default:
@@ -1712,7 +1716,7 @@ static int _get_ekmfweb_settings(struct plugin_handle *ph)
 	_check_config_complete(ph);
 
 	if (ph->ekmf_config.login_token != NULL) {
-		remove(ph->ekmf_config.login_token);
+		plugin_remove_config_file(&ph->pd, ph->ekmf_config.login_token);
 		FREE_AND_SET_NULL(ph->ekmf_config.login_token);
 	}
 	rc = plugin_set_or_remove_property(&ph->pd, EKMFWEB_CONFIG_LOGIN_TOKEN,
@@ -1743,7 +1747,8 @@ static int _get_ekmfweb_settings(struct plugin_handle *ph)
 		goto out;
 
 	if (ph->ekmf_config.ekmf_server_pubkey != NULL)
-		remove(ph->ekmf_config.ekmf_server_pubkey);
+		plugin_remove_config_file(&ph->pd,
+					  ph->ekmf_config.ekmf_server_pubkey);
 	FREE_AND_SET_NULL(ph->ekmf_config.ekmf_server_pubkey);
 
 	util_asprintf((char **)&ph->ekmf_config.ekmf_server_pubkey,
@@ -2048,7 +2053,7 @@ static int _configure_connection(struct plugin_handle *ph,
 		if (rc != 0)
 			goto out;
 	} else {
-		remove(server_cert_file);
+		plugin_remove_config_file(&ph->pd, server_cert_file);
 	}
 	rc = plugin_set_or_remove_property(&ph->pd, EKMFWEB_CONFIG_SERVER_CERT,
 					   tls_trust_server_cert ?
@@ -2067,7 +2072,7 @@ static int _configure_connection(struct plugin_handle *ph,
 		if (rc != 0)
 			goto out;
 	} else {
-		remove(server_pubkey_file);
+		plugin_remove_config_file(&ph->pd, server_pubkey_file);
 	}
 	rc = plugin_set_or_remove_property(&ph->pd,
 					   EKMFWEB_CONFIG_SERVER_PUBKEY,
@@ -2078,13 +2083,13 @@ static int _configure_connection(struct plugin_handle *ph,
 
 out:
 	if (server_cert_temp != NULL) {
-		remove(server_cert_temp);
+		plugin_remove_config_file(&ph->pd, server_cert_temp);
 		free(server_cert_temp);
 	}
 	if (server_cert_file != NULL)
 		free(server_cert_file);
 	if (server_pubkey_temp != NULL) {
-		remove(server_pubkey_temp);
+		plugin_remove_config_file(&ph->pd, server_pubkey_temp);
 		free(server_pubkey_temp);
 	}
 	if (server_pubkey_file != NULL)
@@ -2350,7 +2355,7 @@ static int _generate_identity_key(struct plugin_handle *ph)
 	reenc_file = properties_get(ph->pd.properties,
 				    EKMFWEB_CONFIG_IDENTITY_KEY_REENC);
 	if (reenc_file != NULL) {
-		remove(reenc_file);
+		plugin_remove_config_file(&ph->pd, reenc_file);
 		free(reenc_file);
 		properties_remove(ph->pd.properties,
 				  EKMFWEB_CONFIG_IDENTITY_KEY_REENC);
@@ -3487,7 +3492,7 @@ int kms_login(const kms_handle_t handle)
 		if (rc == 0 && valid)
 			return 0;
 
-		remove(ph->ekmf_config.login_token);
+		plugin_remove_config_file(&ph->pd, ph->ekmf_config.login_token);
 		FREE_AND_SET_NULL(ph->ekmf_config.login_token);
 
 		rc = plugin_set_or_remove_property(&ph->pd,
@@ -3662,16 +3667,20 @@ int kms_reenciper(const kms_handle_t handle, enum kms_reencipher_mode mode,
 
 		printf("Completing re-enciphering of identity key.\n");
 
-		rc = remove(ph->ekmf_config.identity_secure_key);
+		rc = plugin_remove_config_file(&ph->pd,
+					       ph->ekmf_config.identity_secure_key);
 		if (rc != 0) {
-			rc = -errno;
 			_set_error(ph, "Failed to remove file '%s': %s",
 				   ph->ekmf_config.identity_secure_key,
 				   strerror(-rc));
 			goto out;
 		}
 
-		rc = rename(reenc_file, ph->ekmf_config.identity_secure_key);
+		rc = renameat(ph->pd.config_path_fd,
+			      plugin_basename(reenc_file),
+			      ph->pd.config_path_fd,
+			      plugin_basename(
+					ph->ekmf_config.identity_secure_key));
 		if (rc != 0) {
 			rc = -errno;
 			_set_error(ph, "Failed to rename file '%s' to '%s': %s",
@@ -3851,7 +3860,7 @@ int kms_reenciper(const kms_handle_t handle, enum kms_reencipher_mode mode,
 
 out:
 	if (rc != 0 && reenc_file != NULL)
-		remove(reenc_file);
+		plugin_remove_config_file(&ph->pd, reenc_file);
 	if (reenc_file != NULL)
 		free(reenc_file);
 

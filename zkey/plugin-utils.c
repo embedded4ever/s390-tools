@@ -65,6 +65,7 @@ int plugin_init(struct plugin_data *pd, const char *plugin_name,
 	util_assert(config_file != NULL, "Internal error: config_file is NULL");
 
 	memset(pd, 0, sizeof(struct plugin_data));
+	pd->config_path_fd = -1;
 
 	pd->plugin_name = util_strdup(plugin_name);
 	pd->config_path = util_strdup(config_path);
@@ -101,6 +102,15 @@ int plugin_init(struct plugin_data *pd, const char *plugin_name,
 					     S_IRGRP  | S_IWGRP |
 					     S_IROTH);
 
+	pd->config_path_fd = open(config_path,
+				  O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+	if (pd->config_path_fd < 0) {
+		rc = -errno;
+		warnx("Failed to open directory '%s': %s", config_path,
+		      strerror(-rc));
+		goto error;
+	}
+
 	pd->properties = properties_new();
 	rc = plugin_load_config(pd);
 	if (rc != 0 && rc != -EIO) {
@@ -126,6 +136,10 @@ void plugin_term(struct plugin_data *pd)
 
 	pr_verbose(pd, "Plugin terminated");
 
+	if (pd->config_path_fd >= 0) {
+		close(pd->config_path_fd);
+		pd->config_path_fd = -1;
+	}
 	if (pd->plugin_name != NULL)
 		free((void *)pd->plugin_name);
 	if (pd->config_path != NULL)
@@ -233,7 +247,8 @@ int plugin_set_file_permission(struct plugin_data *pd, const char *filename)
 {
 	int fd, rc = 0;
 
-	fd = open(filename, O_RDONLY | O_NOFOLLOW);
+	fd = openat(pd->config_path_fd, plugin_basename(filename),
+		    O_RDONLY | O_NOFOLLOW);
 	if (fd < 0) {
 		rc = -errno;
 		plugin_set_error(pd, "Failed to open '%s': %s", filename,
@@ -327,6 +342,8 @@ out:
  * file (if existent), and then renaming the temporary file to the active file.
  * The active file permissions are also set to the permissions and the group of
  * configuration directory.
+ * All operations are descriptor-relative to config_path_fd so that no
+ * intermediate symlink can redirect them outside the config directory.
  *
  * @param pd                the plugin data
  * @param temp_file         the name of the temporary file
@@ -337,20 +354,22 @@ out:
 int plugin_activate_temp_file(struct plugin_data *pd, const char *temp_file,
 			      const char *active_file)
 {
+	const char *active_base, *temp_base;
 	int rc;
 
-	if (util_path_exists(active_file)) {
-		rc = remove(active_file);
-		if (rc != 0) {
-			rc = -errno;
-			plugin_set_error(pd, "remove failed on file '%s': %s",
-					 active_file, strerror(-rc));
-			return rc;
-		}
+	active_base = plugin_basename(active_file);
+	temp_base = plugin_basename(temp_file);
+
+	if (unlinkat(pd->config_path_fd, active_base, 0) != 0 &&
+	    errno != ENOENT) {
+		rc = -errno;
+		plugin_set_error(pd, "remove failed on file '%s': %s",
+				 active_file, strerror(-rc));
+		return rc;
 	}
 
-	rc = rename(temp_file, active_file);
-	if (rc != 0) {
+	if (renameat(pd->config_path_fd, temp_base,
+		     pd->config_path_fd, active_base) != 0) {
 		rc = -errno;
 		plugin_set_error(pd, "rename failed on file '%s': %s",
 				 temp_file, strerror(-rc));
@@ -358,6 +377,73 @@ int plugin_activate_temp_file(struct plugin_data *pd, const char *temp_file,
 	}
 
 	return plugin_set_file_permission(pd, active_file);
+}
+
+/**
+ * Removes a file that resides directly inside the plugin config directory.
+ * Uses unlinkat(config_path_fd) so no intermediate symlink can redirect the
+ * operation outside the config directory. Only the basename of 'filename'
+ * is used; any directory prefix is ignored.
+ *
+ * @param pd                the plugin data
+ * @param filename          full path of the file to remove (only basename used)
+ *
+ * @returns 0 on success, or a negative errno value on failure
+ */
+int plugin_remove_config_file(struct plugin_data *pd, const char *filename)
+{
+	int rc = 0;
+
+	if (filename == NULL)
+		return 0;
+
+	if (unlinkat(pd->config_path_fd, plugin_basename(filename), 0) != 0)
+		rc = -errno;
+
+	return rc;
+}
+
+/**
+ * Checks whether 'path' resolves to a location strictly inside the plugin's
+ * config directory. Both the config directory and 'path' are canonicalized
+ * via canonicalize_file_name() so that symlinks and '..' components in
+ * 'path' cannot escape the config directory.
+ *
+ * @param pd                the plugin data
+ * @param path              the path to validate
+ *
+ * @returns true if path is inside the config directory, false otherwise.
+ *          On failure (path cannot be resolved) false is returned and the
+ *          plugin error message is set.
+ */
+bool plugin_path_is_within_config(struct plugin_data *pd, const char *path)
+{
+	char *real_config, *real_path;
+	size_t config_len;
+	bool ok = false;
+
+	real_config = canonicalize_file_name(pd->config_path);
+	real_path = canonicalize_file_name(path);
+
+	if (real_config == NULL || real_path == NULL) {
+		plugin_set_error(pd, "Failed to resolve path '%s': %s",
+				 path, strerror(errno));
+		goto out;
+	}
+
+	config_len = strlen(real_config);
+	if (strncmp(real_path, real_config, config_len) == 0 &&
+	    real_path[config_len] == '/')
+		ok = true;
+	else
+		plugin_set_error(pd,
+				 "'%s' is not inside the plugin config "
+				 "directory '%s'", path, pd->config_path);
+
+out:
+	free(real_config);
+	free(real_path);
+	return ok;
 }
 
 /**
