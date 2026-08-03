@@ -772,35 +772,48 @@ out:
 /**
  * Removes a directory and all its contents.
  */
-static int remove_directory_recursively(const char *directory)
+static int remove_directory_recursively(int parent_fd, const char *name)
 {
-	char *filename = NULL;
 	struct dirent *de;
+	struct stat st;
+	int rc = 0, dirfd;
 	DIR *dirp;
-	int rc = 0;
 
-	dirp = opendir(directory);
+	dirfd = openat(parent_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+	if (dirfd < 0) {
+		rc = -errno;
+		warnx("Failed to open directory '%s': %s", name, strerror(-rc));
+		return rc;
+	}
+
+	dirp = fdopendir(dirfd);
 	if (dirp == NULL) {
 		rc = -errno;
-		warnx("Failed to open directory '%s'", directory);
+		close(dirfd);
+		warnx("Failed to open directory '%s': %s", name, strerror(-rc));
 		return rc;
 	}
 
 	while ((de = readdir(dirp))) {
-		util_asprintf(&filename, "%s/%s", directory, de->d_name);
-		if (de->d_type == DT_DIR) {
-			if (strcmp(de->d_name, ".") != 0 &&
-			    strcmp(de->d_name, "..") != 0)
-				rc = remove_directory_recursively(filename);
+		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
+			continue;
+
+		if (fstatat(dirfd, de->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
+			rc = -errno;
+			warnx("Failed to stat '%s': %s", de->d_name,
+			      strerror(-rc));
+			break;
+		}
+
+		if (S_ISDIR(st.st_mode)) {
+			rc = remove_directory_recursively(dirfd, de->d_name);
 		} else {
-			rc = remove(filename);
-			if (rc != 0) {
+			if (unlinkat(dirfd, de->d_name, 0) != 0) {
 				rc = -errno;
-				warnx("Failed to remove '%s': %s", filename,
+				warnx("Failed to remove '%s': %s", de->d_name,
 				      strerror(-rc));
 			}
 		}
-		free(filename);
 
 		if (rc != 0)
 			break;
@@ -809,9 +822,9 @@ static int remove_directory_recursively(const char *directory)
 	if (rc != 0)
 		goto out;
 
-	if (rmdir(directory) != 0) {
+	if (unlinkat(parent_fd, name, AT_REMOVEDIR) != 0) {
 		rc = -errno;
-		warnx("Failed to remove '%s': %s", directory, strerror(-rc));
+		warnx("Failed to remove '%s': %s", name, strerror(-rc));
 		goto out;
 	}
 
@@ -835,9 +848,7 @@ out:
 int unbind_kms_plugin(struct kms_info *kms_info, struct keystore *keystore,
 		      bool UNUSED(verbose))
 {
-	char *config_dir = NULL;
-	char *filename = NULL;
-	int rc;
+	int rc, dirfd = -1;
 
 	util_assert(kms_info != NULL, "Internal error: kms_info is NULL");
 	util_assert(keystore != NULL, "Internal error: keystore is NULL");
@@ -860,30 +871,34 @@ int unbind_kms_plugin(struct kms_info *kms_info, struct keystore *keystore,
 		}
 	}
 
-	config_dir = properties_get(kms_info->props,
-				    KMS_CONFIG_PROP_KMS_CONFIG);
-	if (config_dir != NULL) {
-		rc = remove_directory_recursively(config_dir);
-		if (rc != 0) {
-			warnx("Failed to remove the KMS plugin's config "
-			      "directory: %s", strerror(-rc));
-			goto out;
-		}
+	dirfd = open(keystore->directory,
+		     O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+	if (dirfd < 0) {
+		rc = -errno;
+		warnx("Failed to open directory '%s': %s",
+		      keystore->directory, strerror(-rc));
+		goto out;
 	}
 
-	util_asprintf(&filename, "%s/%s", keystore->directory, KMS_CONFIG_FILE);
-	rc = remove(filename);
+	rc = remove_directory_recursively(dirfd, kms_info->plugin_name);
 	if (rc != 0) {
+		warnx("Failed to remove the KMS plugin's config "
+		      "directory '%s/%s': %s", keystore->directory,
+		      kms_info->plugin_name, strerror(-rc));
+		goto out;
+	}
+
+	if (unlinkat(dirfd, KMS_CONFIG_FILE, 0) != 0) {
 		rc = -errno;
-		warnx("Failed to remove '%s': %s", filename, strerror(-rc));
+		warnx("Failed to remove '%s/%s': %s", keystore->directory,
+		      KMS_CONFIG_FILE, strerror(-rc));
 		goto out;
 	}
 
 out:
-	if (config_dir != NULL)
-		free(config_dir);
-	if (filename != NULL)
-		free(filename);
+	if (dirfd >= 0)
+		close(dirfd);
+
 	return rc;
 }
 
