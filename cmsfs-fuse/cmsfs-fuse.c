@@ -287,6 +287,7 @@ struct walk_file {
 	fuse_fill_dir_t	filler;
 	off_t		*dlist;
 	int		dlist_used;
+	size_t		dlist_alloc;
 };
 
 /*
@@ -1494,6 +1495,7 @@ static void walk_dir_block(struct fst_entry *fst, struct walk_file *walk,
 	}
 
 	if (walk->flag == WALK_FLAG_CACHE_DBLOCKS) {
+		BUG((size_t)walk->dlist_used >= walk->dlist_alloc);
 		walk->dlist[walk->dlist_used++] = walk->addr;
 		return;
 	}
@@ -1956,6 +1958,7 @@ static void cache_dblocks(struct walk_file *walk)
 	memset(walk, 0, sizeof(*walk));
 	walk->flag = WALK_FLAG_CACHE_DBLOCKS;
 	walk->dlist = calloc(dblocks, sizeof(off_t));
+	walk->dlist_alloc = dblocks;
 	if (walk->dlist == NULL)
 		DIE_PERROR("malloc failed");
 	walk_directory(NULL, walk, NULL);
@@ -2163,6 +2166,7 @@ static int cmsfs_create(const char *path, mode_t mode,
 
 		cache_dblocks(&walk);
 		/* add the newly allocated block to dlist */
+		BUG((size_t)walk.dlist_used >= walk.dlist_alloc);
 		walk.dlist[walk.dlist_used++] = fst_addr;
 
 		purge_dblock_ptrs(cmsfs.dir_levels, get_fop(cmsfs.fdir));
