@@ -946,15 +946,15 @@ static void add_record_ext(struct record *rec, struct record_ext *ext)
 static void set_record_extension(struct file *f, int *record, off_t addr,
 				 int len, int block)
 {
-	struct record *rec = &f->rlist[*record];
+	struct record *rec;
 	struct record_ext *ext;
 
 	if (f->record_scan_state != RSS_DATA_BLOCK_STARTED &&
 	    f->record_scan_state != RSS_DATA_BLOCK_EXT)
 		DIE("%s: internal error\n", __func__);
 
-	BUG(*record >= f->fst->nr_records);
-
+	BUG(*record < 0 || *record >= f->fst->nr_records);
+	rec = &f->rlist[*record];
 	ext = malloc(sizeof(struct record_ext));
 	if (ext == NULL)
 		DIE_PERROR("malloc failed\n");
@@ -1080,6 +1080,9 @@ static int walk_var_data_block(struct file *f, off_t addr, unsigned int disp,
 	 * last block or a null block.
 	 */
 	if (disp) {
+		if (*record < 0 && f->record_scan_state != RSS_HEADER_COMPLETE)
+			return -EIO;
+
 		if (addr == NULL_BLOCK) {
 			last = cmsfs.blksize;
 
