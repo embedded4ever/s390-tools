@@ -118,14 +118,13 @@ impl KeyExchangeTrait for SeHdrAadV2 {
         Self::KEY_TYPE
     }
 
-    /** contains_hash - test if the given hash is in this SE-header
-     *
-     * * `hash`: hash to compare, either 32 or 64 byte long
-     *
-     * Returns:
-     *   - false if the given hash is not 64 or 32 bytes long
-     *   - the comparison result otherwise
-     */
+    /// contains_hash - test if the given hash is in this SE-header
+    ///
+    /// * `hash`: hash to compare, either 32 or 64 byte long
+    ///
+    /// Returns:
+    ///   - `false` if the given hash is not 64 or 32 bytes long
+    ///   - the comparison result otherwise
     fn contains_hash<H: AsRef<[u8]>>(&self, hash: H) -> bool {
         let hash = hash.as_ref();
         let size = hash.len();
