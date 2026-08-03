@@ -1265,11 +1265,11 @@ retry:
 	rc = write_secure_key(keyfile, secure_key, secure_key_size, verbose);
 
 out:
-	memset(&clr2seck2, 0, sizeof(clr2seck2));
 	memset(clear_key, 0, clear_key_size);
 	free(clear_key);
 	free(secure_key);
 	free(clr2seck2.apqns);
+	memset(&clr2seck2, 0, sizeof(clr2seck2));
 	return rc;
 }
 
