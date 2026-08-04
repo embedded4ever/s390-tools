@@ -16,7 +16,7 @@
 DUMP_CONFIG_FILE=/etc/sysconfig/dumpconf
 CMDFULL=$0
 CMD="dumpconf"
-LOCKFILE=/var/lock/$CMD
+LOCKFILE=/run/lock/$CMD.lock
 PIDFILE=/run/$CMD.pid
 ERRMSG="Check $DUMP_CONFIG_FILE!"
 
@@ -129,9 +129,10 @@ handle_stop_request()
 
 delay_activation()
 {
-	# Open lock file with file descriptor 123
-	exec 123>$LOCKFILE
-	if flock -n -x 123; then
+	local lock_fd=123
+	# Acquire the lock
+	exec "$lock_fd"<>"$LOCKFILE"
+	if flock -n -x "$lock_fd"; then
 		if [ -f $PIDFILE ]; then
 			# concurrent process was faster
 			exit 0
@@ -142,8 +143,8 @@ delay_activation()
 		# Nothing to do, "dumpconf start" is already in progress
 		exit 0
 	fi
-	# Close file descriptor 123
-	exec 123>&-
+	# Release the lock
+	exec "$lock_fd">&-
 	# Do multiple sleeps in order to be interruptible
 	for ((i=0; i < $DELAY_MINUTES * 60; i++)); do
 		sleep 1
