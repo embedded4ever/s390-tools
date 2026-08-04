@@ -88,6 +88,7 @@ static inline unsigned long b2m(unsigned long blk)
  * Read compressed data entry using global file handle and decompress up to
  * count bytes to the output buffer. The size of the output buffer considered
  * to be enough to fit the decompressed data.
+ * Returns the number of bytes in decompressed output.
  */
 static unsigned long read_decompress_entry(void *buf_out, u64 count)
 {
@@ -145,6 +146,7 @@ static void dfi_s390_ext_mem_chunk_read_decompress(struct dfi_mem_chunk *mem_chu
 	 * Identify the first compressed entry of interest within a memory chunk.
 	 */
 	entry_size = l.hdr.zlib_entry_size;
+	/* Entry index containing requested offset from the start of memory chunk */
 	entry_index = off / entry_size;
 	/* Offset within the decompressed data of the first entry */
 	start_offset = off % entry_size;
@@ -170,8 +172,11 @@ static void dfi_s390_ext_mem_chunk_read_decompress(struct dfi_mem_chunk *mem_chu
 			 */
 			zg_seek(g.fh, compressed_data_addr, ZG_CHECK);
 			decompressed_out = MIN(start_offset + cnt - copied, entry_size);
-			decompressed_out = read_decompress_entry(buf_out, decompressed_out);
-			/* Copy the decompressed output produced so far */
+			/* Bail out if the entry did not decompress to the expected size */
+			if (read_decompress_entry(buf_out, decompressed_out) != decompressed_out)
+				ERR_EXIT("Decompression failed, invalid compressed entry #%d",
+					 entry_index);
+			/* Copy the requested range from the decompressed output */
 			bytes_to_copy = MIN(decompressed_out - start_offset, cnt - copied);
 			memcpy(buf + copied, buf_out + start_offset, bytes_to_copy);
 		}
