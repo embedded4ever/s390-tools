@@ -738,7 +738,7 @@ cli() {
 
 	if [[ "$#" -lt 1 ]]; then
 		usage
-		return 1
+		exit 1
 	fi
 
 	if [[ "$1" == "convert" ]]; then
@@ -758,7 +758,7 @@ cli() {
 	temp=$(getopt -o 'hc:i:' --long 'help,version,config:,image:' -- "$@")
 	if ! eval set -- "$temp"; then
 		usage
-		return 1
+		exit 1
 	fi
 
 	eval set -- "$temp"
@@ -817,7 +817,7 @@ cli() {
 	elif [[ ! -f ${IMAGE} ]]; then
 		log_error "base image ${IMAGE} does not exist"
 
-		return 1
+		exit 1
 	fi
 
 	if [[ -z ${CONFIG_FILE} && ${ACTION} != "list" ]]; then
@@ -826,7 +826,7 @@ cli() {
 	elif [[ -n ${CONFIG_FILE} && ! -f ${CONFIG_FILE} ]]; then
 		log_error "config file ${CONFIG_FILE} does not exist"
 
-		return 1
+		exit 1
 	fi
 
 	if [[ ${ACTION} != "convert" && ${ACTION} != "encrypt" && ${ACTION} != "full" && ${ACTION} != "list" ]]; then
@@ -1474,12 +1474,6 @@ main() {
 	local -
 	set -Eu
 
-	# call cleanup on error
-	# PIPE is needed to allow out=$(main list -i <image> | grep -m 1 <filter>)
-	#   bash will close the subshell executing the main function as soon as grep has found a match
-	#   cleanup will not be executed anymore
-	trap 'cleanup 1' ERR EXIT PIPE
-
 	# general
 	ACTION=""
 	NBD=""
@@ -1517,6 +1511,12 @@ main() {
 
 	# parse command line
 	cli "$@"
+
+	# call cleanup on error
+	# PIPE is needed to allow out=$(main list -i <image> | grep -m 1 <filter>)
+	#   bash will close the subshell executing the main function as soon as grep has found a match
+	#   cleanup will not be executed anymore
+	trap 'cleanup 1' ERR EXIT PIPE
 
 	# set up logger
 	setup_logger
