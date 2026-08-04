@@ -206,6 +206,8 @@ static int read_s390_hdr(void)
 		return -ENODEV;
 	if (l.hdr.zlib_version_s390 && l.hdr.version != 2)
 		return -ENODEV;
+	if (l.hdr.zlib_version_s390 && l.hdr.zlib_entry_size != DUMP_SEGM_ZLIB_ENTSIZE)
+		ERR_EXIT("Unsupported zlib compression entry size in the dump header!");
 	util_log_print(UTIL_LOG_INFO, "DFI S390 version %u\n", l.hdr.version);
 	df_s390_hdr_add(&l.hdr);
 	return 0;
