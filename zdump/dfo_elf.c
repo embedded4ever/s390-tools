@@ -121,7 +121,7 @@ static void dump_chunks_init(void *hdr, u64 hdr_size)
  *   - per-CPU notes
  *   - vmcoreinfo note (if present)
  */
-static u32 hdr_alloc_size(const char *vmcoreinfo)
+static size_t hdr_alloc_size(const char *vmcoreinfo)
 {
 	return sizeof(Elf64_Ehdr) +
 	       sizeof(Elf64_Phdr) +
@@ -137,7 +137,7 @@ static u32 hdr_alloc_size(const char *vmcoreinfo)
 static void dfo_elf_init(void)
 {
 	Elf64_Phdr *phdr_notes, *phdr_loads;
-	u32 alloc_size;
+	size_t alloc_size;
 	void *buf, *ptr;
 	u64 hdr_off;
 	const char *vmcoreinfo = dfi_vmcoreinfo_get();
@@ -158,7 +158,7 @@ static void dfo_elf_init(void)
 	hdr_off = PTR_DIFF(ptr, buf);
 	load_phdrs_init(phdr_loads, hdr_off);
 	if (hdr_off > alloc_size)
-		ABORT("hdr_size=%llu alloc_size=%u", hdr_off, alloc_size);
+		ABORT("hdr_size=%llu alloc_size=%zu", hdr_off, alloc_size);
 	dump_chunks_init(buf, hdr_off);
 }
 
