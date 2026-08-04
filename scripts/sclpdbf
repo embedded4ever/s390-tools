@@ -1010,6 +1010,16 @@ function process() {
 		id=${ascii:0:4}
 		id=${id%%.*}
 
+		# Sanitize input data
+		area="${area//[^0-9]/}"		# %02i
+		ts="${ts//[^0-9:]/}"		# %011ld:%06lu
+		level="${level//[^0-9]/}"	# %1u
+		ex="${ex//[^-\*]/}"		# *|-
+		cpu="${cpu//[^0-9]/}"		# %04u
+		caller="${caller//[^a-f0-9]/}"	# %px
+		hex="${hex//[^a-f0-9 ]/}"	# "%02x "
+		id="${id//[^A-Z0-9]/}"
+
 		if [[ "$once" != 1 ]] ; then
 			echo -n "  Start time ...: "
 			print_ts "$ts"
