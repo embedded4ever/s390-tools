@@ -656,30 +656,60 @@ dasdview_read_vtoc(dasdview_info_t *info)
 
 		switch (tmp.DS1FMTID) {
 		case 0xf1:
-			memcpy(&info->f1[info->f1c], &tmp,
-			       sizeof(format1_label_t));
-			info->f1c++;
+			if (info->f1c < NO_PART_LABELS) {
+				memcpy(&info->f1[info->f1c], &tmp, sizeof(format1_label_t));
+				info->f1c++;
+			} else {
+				zt_error_print("dasdview: VTOC error\n"
+					       "More than %d FMT1 DSCB\n", NO_PART_LABELS);
+				exit(EXIT_FAILURE);
+			}
 			break;
 		case 0xf4:
+			if (info->f4c >= 1) {
+				zt_error_print("dasdview: VTOC error\n"
+					       "More than one FMT4 DSCB!\n");
+				exit(EXIT_FAILURE);
+			}
 			info->f4c++;
 			break;
 		case 0xf5:
+			if (info->f5c >= 1) {
+				zt_error_print("dasdview: VTOC error\n"
+					       "More than one FMT5 DSCB!\n");
+				exit(EXIT_FAILURE);
+			}
 			memcpy(&info->f5, &tmp, sizeof(format1_label_t));
 			info->f5c++;
 			break;
 		case 0xf7:
+			if (info->f7c >= 1) {
+				zt_error_print("dasdview: VTOC error\n"
+					       "More than one FMT7 DSCB!\n");
+				exit(EXIT_FAILURE);
+			}
 			memcpy(&info->f7, &tmp, sizeof(format1_label_t));
 			info->f7c++;
 			break;
 		case 0xf8:
-			memcpy(&info->f8[info->f8c], &tmp,
-			       sizeof(format1_label_t));
-			info->f8c++;
+			if (info->f8c < NO_PART_LABELS) {
+				memcpy(&info->f8[info->f8c], &tmp, sizeof(format1_label_t));
+				info->f8c++;
+			} else {
+				zt_error_print("dasdview: VTOC error\n"
+					       "More than %d FMT8 DSCB\n", NO_PART_LABELS);
+				exit(EXIT_FAILURE);
+			}
 			break;
 		case 0xf9:
-			memcpy(&info->f9[info->f9c], &tmp,
-			       sizeof(format1_label_t));
-			info->f9c++;
+			if (info->f9c < NO_PART_LABELS) {
+				memcpy(&info->f9[info->f9c], &tmp, sizeof(format1_label_t));
+				info->f9c++;
+			} else {
+				zt_error_print("dasdview: VTOC error\n"
+					       "More than %d FMT9 DSCB\n", NO_PART_LABELS);
+				exit(EXIT_FAILURE);
+			}
 			break;
 		case 0x00:
 			break;
@@ -687,24 +717,6 @@ dasdview_read_vtoc(dasdview_info_t *info)
 			printf("Unknown label in VTOC detected (id=%x)\n",
 			       tmp.DS1FMTID);
 		}
-	}
-
-	if (info->f4c > 1) {
-		zt_error_print("dasdview: VTOC error\n"
-			       "More than one FMT4 DSCB!\n");
-		exit(EXIT_FAILURE);
-	}
-
-	if (info->f5c > 1) {
-		zt_error_print("dasdview: VTOC error\n"
-			       "More than one FMT5 DSCB!\n");
-		exit(EXIT_FAILURE);
-	}
-
-	if (info->f7c > 1) {
-		zt_error_print("dasdview: VTOC error\n"
-			       "More than one FMT7 DSCB!\n");
-		exit(EXIT_FAILURE);
 	}
 }
 
