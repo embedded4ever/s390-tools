@@ -3597,13 +3597,14 @@ static ssize_t parse_variable_record(struct dshandle *dsh, char *rec,
  */
 static int dshandle_extract_data_from_trackbuffer(struct dshandle *dsh)
 {
-	char *track;
-	size_t i, trckcount;
-	struct eckd_count *ecount;
 	char *rawdata, *targetdata;
+	struct eckd_count *ecount;
+	unsigned int record_size;
 	unsigned int record;
-	char DS1RECFM;
+	size_t i, trckcount;
 	ssize_t tdsize;
+	char DS1RECFM;
+	char *track;
 
 	DS1RECFM = dsh->ds->dsp[0]->f1->DS1RECFM;
 	trckcount = dsh->rawbufsize / RAWTRACKSIZE;
@@ -3621,6 +3622,13 @@ static int dshandle_extract_data_from_trackbuffer(struct dshandle *dsh)
 		record = 0;
 		rawdata = track;
 		while (!dsh->eof_reached) {
+			ecount = (struct eckd_count *)rawdata;
+			record_size = sizeof(*ecount) + ecount->kl + ecount->dl;
+			if ((unsigned long)rawdata + record_size >
+			    (unsigned long)track + RAWTRACKSIZE) {
+				return errorlog_add_message(&dsh->log, NULL, EPROTO,
+					"data extraction: record extends beyond track boundary\n");
+			}
 			tdsize = 0;
 			if (record >= dsh->startrecord) {
 				/* fixed or undefined record size */
@@ -3645,8 +3653,7 @@ static int dshandle_extract_data_from_trackbuffer(struct dshandle *dsh)
 				targetdata += tdsize;
 				dsh->databufsize += tdsize;
 			}
-			ecount = (struct eckd_count *)rawdata;
-			rawdata += sizeof(*ecount) + ecount->kl + ecount->dl;
+			rawdata += record_size;
 			/* An empty record marks the end of a member / data set
 			 * We need to take startrecord into account or we might
 			 * find the end marker of the previous member.
@@ -3655,14 +3662,14 @@ static int dshandle_extract_data_from_trackbuffer(struct dshandle *dsh)
 			    (!ecount->kl) && (!ecount->dl))
 				dsh->eof_reached = 1;
 			++record;
-			if ((*(unsigned long long *)rawdata) == ENDTOKEN)
-				break;
-			if ((unsigned long)rawdata >=
+			if ((unsigned long)rawdata + sizeof(unsigned long long) >
 			    (unsigned long)track + RAWTRACKSIZE)
 				return errorlog_add_message(
 					&dsh->log, NULL, EPROTO,
 					"data extraction: run over end of"
 					" track buffer\n");
+			if ((*(unsigned long long *)rawdata) == ENDTOKEN)
+				break;
 		}
 		dsh->startrecord = 1;
 		track += RAWTRACKSIZE;
