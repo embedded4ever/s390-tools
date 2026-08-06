@@ -1568,8 +1568,9 @@ static void fdasd_change_part_type(fdasd_anchor_t *anc)
 
 	/* ask for partition type */
 	vtoc_ebcdic_dec(part_info->f1->DS1DSNAM, part_info->f1->DS1DSNAM, 44);
-	ch = strstr(part_info->f1->DS1DSNAM, "PART") + 9;
-	if (ch != NULL) {
+	ch = memmem(part_info->f1->DS1DSNAM, 44, "PART", 4);
+	if (ch != NULL && (ch + 15 - part_info->f1->DS1DSNAM) <= 44) {
+		ch += 9;
 		strncpy(str, ch, 6);
 		str[6] = '\0';
 	} else {
@@ -1594,9 +1595,11 @@ static void fdasd_change_part_type(fdasd_anchor_t *anc)
 	else
 		snprintf(str, 7, "%-6s", dsname);
 
-	ch = strstr(part_info->f1->DS1DSNAM, "PART") + 9;
-	if (ch != NULL)
+	ch = memmem(part_info->f1->DS1DSNAM, 44, "PART", 4);
+	if (ch != NULL && (ch + 15 - part_info->f1->DS1DSNAM) <= 44) {
+		ch += 9;
 		memcpy(ch, str, 6);
+	}
 	vtoc_ebcdic_enc(part_info->f1->DS1DSNAM, part_info->f1->DS1DSNAM, 44);
 	anc->vtoc_changed++;
 }
