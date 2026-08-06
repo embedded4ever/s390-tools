@@ -26,10 +26,9 @@
 /*
  * Initialize ELF loads program headers
  */
-static u64 load_phdrs_init(Elf64_Phdr *phdr, u64 elf_offset)
+static void load_phdrs_init(Elf64_Phdr *phdr, u64 elf_offset)
 {
 	struct dfi_mem_chunk *mem_chunk;
-	u64 mem_size = 0;
 
 	dfi_mem_chunk_iterate(mem_chunk) {
 		phdr->p_type = PT_LOAD;
@@ -45,10 +44,8 @@ static u64 load_phdrs_init(Elf64_Phdr *phdr, u64 elf_offset)
 		phdr->p_flags = PF_R | PF_W | PF_X;
 		phdr->p_align = PAGE_SIZE;
 		elf_offset += phdr->p_filesz;
-		mem_size += phdr->p_memsz;
 		phdr++;
 	}
-	return mem_size;
 }
 
 /*
