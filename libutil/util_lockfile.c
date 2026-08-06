@@ -81,7 +81,7 @@ static int handle_stale_lock(char *lockfile)
 
 	if (fd >= 0) {
 		/* Lock exists, see who owns it */
-		len = read(fd, buf, sizeof(buf));
+		len = read(fd, buf, sizeof(buf) - 1);
 		if (len > 0) {
 			buf[len] = 0; /* Ensure null terminated string */
 			pid = atoi(buf);
@@ -233,7 +233,7 @@ static int do_lockfile_release(char *lockfile, int pid)
 	fd = open(lockfile, O_RDONLY);
 	if (fd < 0)
 		return UTIL_LOCKFILE_RELEASE_NONE;
-	len = read(fd, buf, sizeof(buf));
+	len = read(fd, buf, sizeof(buf) - 1);
 	close(fd);
 	if (len <= 0)
 		return UTIL_LOCKFILE_RELEASE_FAIL;
@@ -367,7 +367,7 @@ int util_lockfile_peek_owner(char *lockfile, int *pid)
 	if (fd < 0)
 		return UTIL_LOCKFILE_ERR;
 
-	len = read(fd, buf, sizeof(buf));
+	len = read(fd, buf, sizeof(buf) - 1);
 	close(fd);
 	if (len <= 0)
 		return UTIL_LOCKFILE_ERR;
