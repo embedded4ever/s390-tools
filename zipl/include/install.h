@@ -157,7 +157,7 @@ static inline struct file_range *get_envblk_range(struct install_set *bis)
 int prepare_bootloader(struct job_data *job, struct install_set *bis);
 int install_bootloader(struct job_data *job, struct install_set *bis);
 int post_install_bootloader(struct job_data *job, struct install_set *bis);
-void free_bootloader(struct install_set *bis, struct job_data *job);
+void free_bootloader(struct install_set *bis);
 int install_tapeloader(const char* device, const char* image,
 		       const char* parmline, const char* ramdisk,
 		       address_t image_addr, address_t parm_addr,

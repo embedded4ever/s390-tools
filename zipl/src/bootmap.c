@@ -2060,11 +2060,11 @@ int post_install_bootloader(struct job_data *job, struct install_set *bis)
 /**
  * Release all resources accumulated along the installation process
  */
-void free_bootloader(struct install_set *bis, struct job_data *job)
+void free_bootloader(struct install_set *bis)
 {
 	int i, j, k;
 
-	for (k = 0; k < job_get_nr_targets(job); k++) {
+	for (k = 0; k < MAX_TARGETS; k++) {
 		for (i = 0; i < NR_PROGRAM_TABLES; i++)
 			free(bis->mirrors[k].tables[i].stage1b_list);
 		for (i = 0; i < NR_PROGRAM_COMPONENTS; i++) {
