@@ -63,7 +63,6 @@ static struct util_opt lshwc_opt_vec[] = {
 	{
 		.option = { "counters", required_argument, NULL, 'c' },
 		.argument = "LIST",
-		.flags = UTIL_OPT_FLAG_NOSHORT,
 		.desc = "Specify comma separated list of counters to display"
 	},
 	UTIL_OPT_HELP,
