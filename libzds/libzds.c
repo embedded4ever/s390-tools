@@ -2083,6 +2083,11 @@ static int extract_members_from_track(char *trackdata, struct dataset *ds,
 		 * This number includes the first two bytes.
 		 */
 		used_bytes = (*(unsigned short *)data);
+		if (used_bytes < 2 || used_bytes > ecount->dl) {
+			return errorlog_add_message(&ds->log, NULL, EPROTO,
+				"member analysis: invalid used-bytes count %d\n",
+				used_bytes);
+		}
 		residual = used_bytes - sizeof(unsigned short);
 		data += sizeof(unsigned short);
 		/* Loop over directory entries in record */
