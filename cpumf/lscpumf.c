@@ -4131,35 +4131,43 @@ static void show_counter(bool all)
 int main(int argc, char **argv)
 {
 	bool all = false;
-	int ret;
+	int action;
+	int pmu_type;
+	int ret = EXIT_SUCCESS;
 
 	util_prg_init(&prg);
 	util_opt_init(lscpumf_opt_vec, NULL);
 
-	ret = parse_args(argc, argv);
+	action = parse_args(argc, argv);
 	if (read_info() == EXIT_FAILURE)
 		return EXIT_FAILURE;
 
-	switch (ret) {
+	switch (action) {
 	case ACTION_CNT:
 	case ACTION_CNTALL:
-		all = ret == ACTION_CNTALL;
-		ret = libcpumf_pmutype(S390_CPUMF_CF);
-		if (ret >= EXIT_SUCCESS) {
-			set_prefix(ret);
+		all = action == ACTION_CNTALL;
+		pmu_type = libcpumf_pmutype(S390_CPUMF_CF);
+		if (pmu_type >= EXIT_SUCCESS) {
+			set_prefix(pmu_type);
 			show_counter(all);
+		} else {
+			warnx("No CPU-measurement counter facility detected");
+			ret = EXIT_FAILURE;
 		}
 		break;
 	case ACTION_SAMPLE:
-		ret = libcpumf_pmutype(S390_CPUMF_SF);
-		if (ret >= EXIT_SUCCESS) {
-			set_prefix(ret);
+		pmu_type = libcpumf_pmutype(S390_CPUMF_SF);
+		if (pmu_type >= EXIT_SUCCESS) {
+			set_prefix(pmu_type);
 			show_sample();
+		} else {
+			warnx("No CPU-measurement sampling facility detected");
+			ret = EXIT_FAILURE;
 		}
 		break;
 	case ACTION_NONE:
 	case ACTION_INFO:
-		show_info(&cpumf, ret == ACTION_INFO);
+		show_info(&cpumf, action == ACTION_INFO);
 		ret = EXIT_SUCCESS;
 		break;
 	}
