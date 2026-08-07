@@ -11,18 +11,19 @@
 
 
 #include <ctype.h>
-#include <sys/sysmacros.h>
+#include <linux/raid/md_u.h>
 #include <sys/ioctl.h>
+#include <sys/sysmacros.h>
 
-#include "lib/util_libc.h"
-#include "lib/util_proc.h"
 #include "lib/util_base.h"
-#include "lib/zt_common.h"
+#include "lib/util_file.h"
+#include "lib/util_libc.h"
 #include "lib/util_path.h"
+#include "lib/util_proc.h"
+#include "lib/zt_common.h"
 
 #include "ipl_tools.h"
 #include "proc.h"
-#include <linux/raid/md_u.h>
 
 #define BOOTPARMS_NSS_MAX	56
 #define BOOTPARMS_CCW_MAX	64
@@ -469,8 +470,9 @@ static int get_chreipl_helper_cmd(dev_t dev, char *dev_name, char cmd[PATH_MAX])
  */
 static int set_reipl_type_helper(int maj, int min, char *dev_name)
 {
-	char helper_cmd[PATH_MAX], buf[4096];
 	struct proc_part_entry ppe;
+	char helper_cmd[PATH_MAX];
+	char *buf = NULL;
 	int rc = -1;
 	dev_t dev;
 	FILE *fh;
@@ -480,8 +482,9 @@ static int set_reipl_type_helper(int maj, int min, char *dev_name)
 	fh = popen(helper_cmd, "r");
 	if (fh == NULL)
 		ERR_EXIT_ERRNO("Could not start chreipl_helper");
-	if (fread(buf, 1, sizeof(buf), fh) == 0)
-		ERR_EXIT_ERRNO("Could not read from chreipl_helper");
+	buf = util_file_read_fd(fh, 1);
+	if (buf == NULL)
+		ERR_EXIT("Could not read from chreipl_helper");
 
 	if (sscanf(buf, "%d:%d", &maj, &min) != 2)
 		goto fail_pclose;
@@ -494,6 +497,7 @@ static int set_reipl_type_helper(int maj, int min, char *dev_name)
 fail_part_free:
 	proc_part_free_entry(&ppe);
 fail_pclose:
+	free(buf);
 	pclose(fh);
 	return rc;
 }
