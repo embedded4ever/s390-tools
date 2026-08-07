@@ -29,10 +29,11 @@
 #include <ctype.h>
 #include <linux/types.h>
 
-#include "lib/vmdump.h"
-#include "lib/zt_common.h"
+#include "lib/util_file.h"
 #include "lib/util_libc.h"
 #include "lib/vmcp.h"
+#include "lib/vmdump.h"
+#include "lib/zt_common.h"
 
 #include "vmur.h"
 
@@ -370,20 +371,10 @@ static void cpcmd_cs(char *cpcmd, char **resp, int *rc, int retry)
  */
 static int get_minor(char *path)
 {
-	FILE *fd;
-	char buf[20];
-	int major, minor, rc;
+	int major, minor;
 
-	fd = fopen(path, "r");
-	if (!fd)
-		ERR_EXIT("Could not open %s (err = %i)\n", path, errno);
-	rc = fread(buf, sizeof(buf), 1, fd);
-	if (rc == -1)
-		ERR_EXIT("Could not read %s (err = %i)\n", path, errno);
-	fclose(fd);
-
-	if (sscanf(buf, "%i:%i", &major, &minor) != 2)
-		ERR_EXIT("Malformed content of %s: %s\n", path, buf);
+	if (util_file_read_va(path, "%i:%i", &major, &minor) != 2)
+		ERR_EXIT("Could not read %s\n", path);
 
 	return minor;
 }
