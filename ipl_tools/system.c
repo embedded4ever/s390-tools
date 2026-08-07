@@ -18,21 +18,15 @@
  */
 int is_lpar(void)
 {
-	size_t bytes_read;
-	char buf[2048];
 	int rc = 0;
-	FILE *fh;
+	char *buf;
 
-	fh = fopen("/proc/cpuinfo", "r");
-	if (fh == NULL)
-		ERR_EXIT_ERRNO("Could not open \"/proc/cpuinfo\"");
-	bytes_read = fread(buf, 1, sizeof(buf), fh);
-	if (bytes_read == 0)
-		ERR_EXIT("Could not read \"/proc/cpuinfo\"");
-	buf[bytes_read] = '\0';
+	buf = util_file_read_text_file("/proc/cpuinfo", 1);
+	if (buf == NULL)
+		ERR_EXIT_ERRNO("Could not read \"/proc/cpuinfo\"");
 	if (strstr(buf, "version = FF") == NULL)
 		rc = 1;
-	fclose(fh);
+	free(buf);
 	return rc;
 }
 
