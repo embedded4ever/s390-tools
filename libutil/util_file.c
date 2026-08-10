@@ -549,9 +549,9 @@ int util_file_read_va(const char *path, const char *fmt, ...)
  * @buffer_ptr. If @size_ptr is non-zero, use it to store the size of the
  * resulting buffer. Return %UTIL_EXIT_OK on success.
  *
- * @param[in]      fd         File descriptor to read data from
- * @param[in, out] buffer_ptr Buffer to read data into
- * @param[in, out] size_ptr   Buffer to save size of data read into buffer_ptr
+ * @param[in]  fd         File descriptor to read data from
+ * @param[out] buffer_ptr Buffer to read data into
+ * @param[out] size_ptr   Buffer to save size of data read into buffer_ptr
  *
  * @retval         0                       read was successful
  * @retval         UTIL_EXIT_RUNTIME_ERROR error while reading file
