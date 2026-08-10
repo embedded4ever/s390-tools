@@ -238,7 +238,7 @@ static int read_zpwrinfo(struct zpwrinfo *pinfo, struct pib *pib)
 			pinfo->cvalid = true;
 		} else {
 			rc = -EINVAL;
-			warnx("Unknown format detected:%d\n", prologue->format);
+			warnx("Unknown format detected: %d", prologue->format);
 			break;
 		}
 		metrics += NAMELEN;
